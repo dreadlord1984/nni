@@ -1,27 +1,13 @@
-# Copyright (c) Microsoft Corporation
-# All rights reserved.
-#
-# MIT License
-#
-# Permission is hereby granted, free of charge,
-# to any person obtaining a copy of this software and associated
-# documentation files (the "Software"), to deal in the Software without restriction,
-# including without limitation the rights to use, copy, modify, merge, publish,
-# distribute, sublicense, and/or sell copies of the Software, and
-# to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
-# BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT license.
 
 import os
 import json
-from .config_schema import LOCAL_CONFIG_SCHEMA, REMOTE_CONFIG_SCHEMA, PAI_CONFIG_SCHEMA, KUBEFLOW_CONFIG_SCHEMA, FRAMEWORKCONTROLLER_CONFIG_SCHEMA
-from .common_utils import get_json_content, print_error, print_warning, print_normal
+from schema import SchemaError
+from schema import Schema
+from .config_schema import LOCAL_CONFIG_SCHEMA, REMOTE_CONFIG_SCHEMA, PAI_CONFIG_SCHEMA, PAI_YARN_CONFIG_SCHEMA, KUBEFLOW_CONFIG_SCHEMA,\
+                           FRAMEWORKCONTROLLER_CONFIG_SCHEMA, tuner_schema_dict, advisor_schema_dict, assessor_schema_dict
+from .common_utils import print_error, print_warning, print_normal
 
 def expand_path(experiment_config, key):
     '''Change '~' to user home directory'''
@@ -53,19 +39,52 @@ def parse_path(experiment_config, config_path):
     expand_path(experiment_config, 'searchSpacePath')
     if experiment_config.get('trial'):
         expand_path(experiment_config['trial'], 'codeDir')
+        if experiment_config['trial'].get('authFile'):
+            expand_path(experiment_config['trial'], 'authFile')
+        if experiment_config['trial'].get('ps'):
+            if experiment_config['trial']['ps'].get('privateRegistryAuthPath'):
+                expand_path(experiment_config['trial']['ps'], 'privateRegistryAuthPath')
+        if experiment_config['trial'].get('master'):
+            if experiment_config['trial']['master'].get('privateRegistryAuthPath'):
+                expand_path(experiment_config['trial']['master'], 'privateRegistryAuthPath')
+        if experiment_config['trial'].get('worker'):
+            if experiment_config['trial']['worker'].get('privateRegistryAuthPath'):
+                expand_path(experiment_config['trial']['worker'], 'privateRegistryAuthPath')
+        if experiment_config['trial'].get('taskRoles'):
+            for index in range(len(experiment_config['trial']['taskRoles'])):
+                if experiment_config['trial']['taskRoles'][index].get('privateRegistryAuthPath'):
+                    expand_path(experiment_config['trial']['taskRoles'][index], 'privateRegistryAuthPath')
     if experiment_config.get('tuner'):
         expand_path(experiment_config['tuner'], 'codeDir')
     if experiment_config.get('assessor'):
         expand_path(experiment_config['assessor'], 'codeDir')
     if experiment_config.get('advisor'):
         expand_path(experiment_config['advisor'], 'codeDir')
-    
+    if experiment_config.get('machineList'):
+        for index in range(len(experiment_config['machineList'])):
+            expand_path(experiment_config['machineList'][index], 'sshKeyPath')
+
     #if users use relative path, convert it to absolute path
     root_path = os.path.dirname(config_path)
     if experiment_config.get('searchSpacePath'):
         parse_relative_path(root_path, experiment_config, 'searchSpacePath')
     if experiment_config.get('trial'):
         parse_relative_path(root_path, experiment_config['trial'], 'codeDir')
+        if experiment_config['trial'].get('authFile'):
+            parse_relative_path(root_path, experiment_config['trial'], 'authFile')
+        if experiment_config['trial'].get('ps'):
+            if experiment_config['trial']['ps'].get('privateRegistryAuthPath'):
+                parse_relative_path(root_path, experiment_config['trial']['ps'], 'privateRegistryAuthPath')
+        if experiment_config['trial'].get('master'):
+            if experiment_config['trial']['master'].get('privateRegistryAuthPath'):
+                parse_relative_path(root_path, experiment_config['trial']['master'], 'privateRegistryAuthPath')
+        if experiment_config['trial'].get('worker'):
+            if experiment_config['trial']['worker'].get('privateRegistryAuthPath'):
+                parse_relative_path(root_path, experiment_config['trial']['worker'], 'privateRegistryAuthPath')
+        if experiment_config['trial'].get('taskRoles'):
+            for index in range(len(experiment_config['trial']['taskRoles'])):
+                if experiment_config['trial']['taskRoles'][index].get('privateRegistryAuthPath'):
+                    parse_relative_path(root_path, experiment_config['trial']['taskRoles'][index], 'privateRegistryAuthPath')
     if experiment_config.get('tuner'):
         parse_relative_path(root_path, experiment_config['tuner'], 'codeDir')
     if experiment_config.get('assessor'):
@@ -77,8 +96,8 @@ def parse_path(experiment_config, config_path):
             parse_relative_path(root_path, experiment_config['machineList'][index], 'sshKeyPath')
 
 def validate_search_space_content(experiment_config):
-    '''Validate searchspace content, 
-       if the searchspace file is not json format or its values does not contain _type and _value which must be specified, 
+    '''Validate searchspace content,
+       if the searchspace file is not json format or its values does not contain _type and _value which must be specified,
        it will not be a valid searchspace file'''
     try:
         search_space_content = json.load(open(experiment_config.get('searchSpacePath'), 'r'))
@@ -107,7 +126,7 @@ def validate_kubeflow_operators(experiment_config):
             if experiment_config.get('trial').get('master') is None:
                 print_error('kubeflow with pytorch-operator must set master')
                 exit(1)
-        
+
         if experiment_config.get('kubeflowConfig').get('storage') == 'nfs':
             if experiment_config.get('kubeflowConfig').get('nfs') is None:
                 print_error('please set nfs configuration!')
@@ -124,31 +143,57 @@ def validate_kubeflow_operators(experiment_config):
 def validate_common_content(experiment_config):
     '''Validate whether the common values in experiment_config is valid'''
     if not experiment_config.get('trainingServicePlatform') or \
-        experiment_config.get('trainingServicePlatform') not in ['local', 'remote', 'pai', 'kubeflow', 'frameworkcontroller']:
+        experiment_config.get('trainingServicePlatform') not in ['local', 'remote', 'pai', 'kubeflow', 'frameworkcontroller', 'paiYarn']:
         print_error('Please set correct trainingServicePlatform!')
         exit(1)
     schema_dict = {
-            'local': LOCAL_CONFIG_SCHEMA,
-            'remote': REMOTE_CONFIG_SCHEMA,
-            'pai': PAI_CONFIG_SCHEMA,
-            'kubeflow': KUBEFLOW_CONFIG_SCHEMA,
-            'frameworkcontroller': FRAMEWORKCONTROLLER_CONFIG_SCHEMA
+        'local': LOCAL_CONFIG_SCHEMA,
+        'remote': REMOTE_CONFIG_SCHEMA,
+        'pai': PAI_CONFIG_SCHEMA,
+        'paiYarn': PAI_YARN_CONFIG_SCHEMA,
+        'kubeflow': KUBEFLOW_CONFIG_SCHEMA,
+        'frameworkcontroller': FRAMEWORKCONTROLLER_CONFIG_SCHEMA
         }
+    separate_schema_dict = {
+        'tuner': tuner_schema_dict,
+        'advisor': advisor_schema_dict,
+        'assessor': assessor_schema_dict
+    }
+    separate_builtInName_dict = {
+        'tuner': 'builtinTunerName',
+        'advisor': 'builtinAdvisorName',
+        'assessor': 'builtinAssessorName'
+    }
     try:
         schema_dict.get(experiment_config['trainingServicePlatform']).validate(experiment_config)
-        #set default value
-        if experiment_config.get('maxExecDuration') is None:
-            experiment_config['maxExecDuration'] = '999d'
-        if experiment_config.get('maxTrialNum') is None:
-            experiment_config['maxTrialNum'] = 99999
-        if experiment_config['trainingServicePlatform'] == 'remote':
-            for index in range(len(experiment_config['machineList'])):
-                if experiment_config['machineList'][index].get('port') is None:
-                    experiment_config['machineList'][index]['port'] = 22
-                
-    except Exception as exception:
-        print_error('Your config file is not correct, please check your config file content!\n%s' % exception)
+        for separate_key in separate_schema_dict.keys():
+            if experiment_config.get(separate_key):
+                if experiment_config[separate_key].get(separate_builtInName_dict[separate_key]):
+                    validate = False
+                    for key in separate_schema_dict[separate_key].keys():
+                        if key.__contains__(experiment_config[separate_key][separate_builtInName_dict[separate_key]]):
+                            Schema({**separate_schema_dict[separate_key][key]}).validate(experiment_config[separate_key])
+                            validate = True
+                            break
+                    if not validate:
+                        print_error('%s %s error!' % (separate_key, separate_builtInName_dict[separate_key]))
+                        exit(1)
+                else:
+                    Schema({**separate_schema_dict[separate_key]['customized']}).validate(experiment_config[separate_key])
+    except SchemaError as error:
+        print_error('Your config file is not correct, please check your config file content!')
+        print_error(error.code)
         exit(1)
+
+    #set default value
+    if experiment_config.get('maxExecDuration') is None:
+        experiment_config['maxExecDuration'] = '999d'
+    if experiment_config.get('maxTrialNum') is None:
+        experiment_config['maxTrialNum'] = 99999
+    if experiment_config['trainingServicePlatform'] == 'remote':
+        for index in range(len(experiment_config['machineList'])):
+            if experiment_config['machineList'][index].get('port') is None:
+                experiment_config['machineList'][index]['port'] = 22
 
 def validate_customized_file(experiment_config, spec_key):
     '''
@@ -169,24 +214,18 @@ def validate_customized_file(experiment_config, spec_key):
 
 def parse_tuner_content(experiment_config):
     '''Validate whether tuner in experiment_config is valid'''
-    if experiment_config['tuner'].get('builtinTunerName'):
-        experiment_config['tuner']['className'] = experiment_config['tuner']['builtinTunerName']
-    else:
+    if not experiment_config['tuner'].get('builtinTunerName'):
         validate_customized_file(experiment_config, 'tuner')
 
 def parse_assessor_content(experiment_config):
     '''Validate whether assessor in experiment_config is valid'''
     if experiment_config.get('assessor'):
-        if experiment_config['assessor'].get('builtinAssessorName'):
-            experiment_config['assessor']['className'] = experiment_config['assessor']['builtinAssessorName']
-        else:
+        if not experiment_config['assessor'].get('builtinAssessorName'):
             validate_customized_file(experiment_config, 'assessor')
 
 def parse_advisor_content(experiment_config):
     '''Validate whether advisor in experiment_config is valid'''
-    if experiment_config['advisor'].get('builtinAdvisorName'):
-        experiment_config['advisor']['className'] = experiment_config['advisor']['builtinAdvisorName']
-    else:
+    if not experiment_config['advisor'].get('builtinAdvisorName'):
         validate_customized_file(experiment_config, 'advisor')
 
 def validate_annotation_content(experiment_config, spec_key, builtin_name):
@@ -215,12 +254,32 @@ def validate_machine_list(experiment_config):
         print_error('Please set machineList!')
         exit(1)
 
+def validate_pai_trial_conifg(experiment_config):
+    '''validate the trial config in pai platform'''
+    if experiment_config.get('trainingServicePlatform') in ['pai', 'paiYarn']:
+        if experiment_config.get('trial').get('shmMB') and \
+        experiment_config['trial']['shmMB'] > experiment_config['trial']['memoryMB']:
+            print_error('shmMB should be no more than memoryMB!')
+            exit(1)
+        #backward compatibility
+        warning_information = '{0} is not supported in NNI anymore, please remove the field in config file!\
+        please refer https://github.com/microsoft/nni/blob/master/docs/en_US/TrainingService/PaiMode.md#run-an-experiment\
+        for the practices of how to get data and output model in trial code'
+        if experiment_config.get('trial').get('dataDir'):
+            print_warning(warning_information.format('dataDir'))
+        if experiment_config.get('trial').get('outputDir'):
+            print_warning(warning_information.format('outputDir'))
+
 def validate_all_content(experiment_config, config_path):
     '''Validate whether experiment_config is valid'''
     parse_path(experiment_config, config_path)
     validate_common_content(experiment_config)
+    validate_pai_trial_conifg(experiment_config)
     experiment_config['maxExecDuration'] = parse_time(experiment_config['maxExecDuration'])
     if experiment_config.get('advisor'):
+        if experiment_config.get('assessor') or experiment_config.get('tuner'):
+            print_error('advisor could not be set with assessor or tuner simultaneously!')
+            exit(1)
         parse_advisor_content(experiment_config)
         validate_annotation_content(experiment_config, 'advisor', 'builtinAdvisorName')
     else:

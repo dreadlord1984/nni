@@ -1,21 +1,5 @@
-/**
- * Copyright (c) Microsoft Corporation
- * All rights reserved.
- *
- * MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
- * documentation files (the "Software"), to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
- * to permit persons to whom the Software is furnished to do so, subject to the following conditions:
- * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
- * BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
- * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- */
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
 
 'use strict';
 
@@ -24,7 +8,8 @@ import { Deferred } from 'ts-deferred';
 
 import * as component from '../common/component';
 import { Database, DataStore, MetricData, MetricDataRecord, MetricType,
-    TrialJobEvent, TrialJobEventRecord, TrialJobInfo } from '../common/datastore';
+    TrialJobEvent, TrialJobEventRecord, TrialJobInfo, HyperParameterFormat,
+    ExportedDataFormat } from '../common/datastore';
 import { NNIError } from '../common/errors';
 import { getExperimentId, isNewExperiment } from '../common/experimentStartupInfo';
 import { getLogger, Logger } from '../common/log';
@@ -77,7 +62,7 @@ class NNIDataStore implements DataStore {
         try {
             await this.db.storeExperimentProfile(experimentProfile);
         } catch (err) {
-            throw new NNIError('Datastore error', `Datastore error: ${err.message}`, err);
+            throw NNIError.FromError(err, 'Datastore error: ');
         }
     }
 
@@ -105,7 +90,7 @@ class NNIDataStore implements DataStore {
 
         return this.db.storeTrialJobEvent(event, trialJobId, timestamp, hyperParameter, jobDetail).catch(
                 (err: Error) => {
-                    throw new NNIError('Datastore error', `Datastore error: ${err.message}`, err);
+                    throw NNIError.FromError(err, 'Datastore error: ');
                 }
             );
     }
@@ -140,6 +125,7 @@ class NNIDataStore implements DataStore {
 
     public async getTrialJob(trialJobId: string): Promise<TrialJobInfo> {
         const trialJobs: TrialJobInfo[] = await this.queryTrialJobs(undefined, trialJobId);
+        assert(trialJobs.length <= 1);
 
         return trialJobs[0];
     }
@@ -163,12 +149,67 @@ class NNIDataStore implements DataStore {
                 timestamp: Date.now()
             }));
         } catch (err) {
-            throw new NNIError('Datastore error', `Datastore error: ${err.message}`, err);
+            throw NNIError.FromError(err, 'Datastore error');
         }
     }
 
     public getMetricData(trialJobId?: string, metricType?: MetricType): Promise<MetricDataRecord[]> {
         return this.db.queryMetricData(trialJobId, metricType);
+    }
+
+    public async exportTrialHpConfigs(): Promise<string> {
+        const jobs: TrialJobInfo[] = await this.listTrialJobs();
+        const exportedData: ExportedDataFormat[] = [];
+        for (const job of jobs) {
+            if (job.hyperParameters && job.finalMetricData) {
+                if (job.hyperParameters.length === 1 && job.finalMetricData.length === 1) {
+                    // optimization for non-multi-phase case
+                    const parameters: HyperParameterFormat = <HyperParameterFormat>JSON.parse(job.hyperParameters[0]);
+                    const oneEntry: ExportedDataFormat = {
+                        parameter: parameters.parameters,
+                        value: JSON.parse(job.finalMetricData[0].data),
+                        id: job.id
+                    };
+                    exportedData.push(oneEntry);
+                } else {
+                    const paraMap: Map<number, Record<string, any>> = new Map();
+                    const metricMap: Map<number, Record<string, any>> = new Map();
+                    for (const eachPara of job.hyperParameters) {
+                        const parameters: HyperParameterFormat = <HyperParameterFormat>JSON.parse(eachPara);
+                        paraMap.set(parameters.parameter_id, parameters.parameters);
+                    }
+                    for (const eachMetric of job.finalMetricData) {
+                        const value: Record<string, any> = JSON.parse(eachMetric.data);
+                        metricMap.set(Number(eachMetric.parameterId), value);
+                    }
+                    paraMap.forEach((value: Record<string, any>, key: number) => {
+                        const metricValue: Record<string, any> | undefined = metricMap.get(key);
+                        if (metricValue) {
+                            const oneEntry: ExportedDataFormat = {
+                                parameter: value,
+                                value: metricValue,
+                                id: job.id
+                            };
+                            exportedData.push(oneEntry);
+                        }
+                    });
+                }
+            }
+        }
+
+        return JSON.stringify(exportedData);
+    }
+
+    public async getImportedData(): Promise<string[]> {
+        const importedData: string[] = [];
+        const importDataEvents: TrialJobEventRecord[] = await this.db.queryTrialJobEvent(undefined, 'IMPORT_DATA');
+        for (const event of importDataEvents) {
+            if (event.data) {
+                importedData.push(event.data);
+            }
+        }
+
+        return importedData;
     }
 
     private async queryTrialJobs(status?: TrialJobStatus, trialJobId?: string): Promise<TrialJobInfo[]> {
@@ -250,29 +291,25 @@ class NNIDataStore implements DataStore {
         return <TrialJobStatus>event;
     }
 
-    private mergeHyperParameters(hyperParamList: string[], newParamStr: string): string[] {
-        const mergedHyperParams: any[] = [];
-        let newParam: any;
+    private parseHyperParameter(hParamStr: string): any {
+        let hParam: any;
         try {
-            newParam = JSON.parse(newParamStr);
+            hParam = JSON.parse(hParamStr);
+
+            return hParam;
         } catch (err) {
-            this.log.error(`Hyper parameter needs to be in json format: ${newParamStr}`);
+            this.log.error(`Hyper parameter needs to be in json format: ${hParamStr}`);
 
-            return hyperParamList;
+            return undefined;
         }
-        for (const hyperParamStr of hyperParamList) {
-            const hyperParam: any = JSON.parse(hyperParamStr);
-            mergedHyperParams.push(hyperParam);
-        }
-        if (mergedHyperParams.filter((value: any) => value.parameter_index === newParam.parameter_index).length <= 0) {
-            mergedHyperParams.push(newParam);
-        }
-
-        return mergedHyperParams.map<string>((value: any) => { return JSON.stringify(value); });
     }
 
     private getTrialJobsByReplayEvents(trialJobEvents: TrialJobEventRecord[]):  Map<string, TrialJobInfo> {
+        this.log.debug('getTrialJobsByReplayEvents begin');
+
         const map: Map<string, TrialJobInfo> = new Map();
+        const hParamIdMap: Map<string, Set<number>> = new Map();
+
         // assume data is stored by time ASC order
         for (const record of trialJobEvents) {
             let jobInfo: TrialJobInfo | undefined;
@@ -291,6 +328,7 @@ class NNIDataStore implements DataStore {
             if (!jobInfo) {
                 throw new Error('Empty JobInfo');
             }
+            /* eslint-disable no-fallthrough */
             switch (record.event) {
                 case 'RUNNING':
                     if (record.timestamp !== undefined) {
@@ -320,12 +358,24 @@ class NNIDataStore implements DataStore {
                     }
                 default:
             }
+            /* eslint-enable no-fallthrough */
             jobInfo.status = this.getJobStatusByLatestEvent(jobInfo.status, record.event);
             if (record.data !== undefined && record.data.trim().length > 0) {
-                if (jobInfo.hyperParameters !== undefined) {
-                    jobInfo.hyperParameters = this.mergeHyperParameters(jobInfo.hyperParameters, record.data);
-                } else {
-                    assert(false, 'jobInfo.hyperParameters is undefined');
+                const newHParam: any = this.parseHyperParameter(record.data);
+                if (newHParam !== undefined) {
+                    if (jobInfo.hyperParameters !== undefined) {
+                        let hParamIds: Set<number> | undefined = hParamIdMap.get(jobInfo.id);
+                        if (hParamIds === undefined) {
+                            hParamIds = new Set();
+                        }
+                        if (!hParamIds.has(newHParam.parameter_index)) {
+                            jobInfo.hyperParameters.push(JSON.stringify(newHParam));
+                            hParamIds.add(newHParam.parameter_index);
+                            hParamIdMap.set(jobInfo.id, hParamIds);
+                        }
+                    } else {
+                        assert(false, 'jobInfo.hyperParameters is undefined');
+                    }
                 }
             }
             if (record.sequenceId !== undefined && jobInfo.sequenceId === undefined) {
@@ -333,6 +383,8 @@ class NNIDataStore implements DataStore {
             }
             map.set(record.trialJobId, jobInfo);
         }
+
+        this.log.debug('getTrialJobsByReplayEvents done');
 
         return map;
     }

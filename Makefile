@@ -52,9 +52,10 @@ $(shell mkdir -p $(NNI_DEPENDENCY_FOLDER))
 NNI_NODE_TARBALL ?= $(NNI_DEPENDENCY_FOLDER)/nni-node-$(OS_SPEC)-x64.tar.xz
 NNI_NODE_FOLDER = $(NNI_DEPENDENCY_FOLDER)/nni-node-$(OS_SPEC)-x64
 NNI_NODE ?= $(BIN_FOLDER)/node
+NNI_NPM ?= $(BIN_FOLDER)/npm
 NNI_YARN_TARBALL ?= $(NNI_DEPENDENCY_FOLDER)/nni-yarn.tar.gz
 NNI_YARN_FOLDER ?= $(NNI_DEPENDENCY_FOLDER)/nni-yarn
-NNI_YARN := PATH=$(BIN_FOLDER):$${PATH} $(NNI_YARN_FOLDER)/bin/yarn
+NNI_YARN ?= PATH=$(BIN_FOLDER):$${PATH} $(NNI_YARN_FOLDER)/bin/yarn
 
 ## Version number
 NNI_VERSION_VALUE = $(shell git describe --tags)
@@ -66,6 +67,7 @@ NNI_VERSION_TEMPLATE = 999.0.0-developing
 build:
 	#$(_INFO) Building NNI Manager $(_END)
 	cd src/nni_manager && $(NNI_YARN) && $(NNI_YARN) build
+	cp -rf src/nni_manager/config src/nni_manager/dist/
 	#$(_INFO) Building WebUI $(_END)
 	cd src/webui && $(NNI_YARN) && $(NNI_YARN) build
 
@@ -109,19 +111,10 @@ dev-install: install-scripts
 dev-install:
 	#$(_INFO) Complete! You may want to add $(BIN_FOLDER) to your PATH environment $(_END)
 
-# Target for setup.py
-# Do not invoke this manually
-.PHONY: pip-install
-pip-install: install-dependencies
-pip-install: build
-pip-install: install-node-modules
-pip-install: install-scripts
-pip-install: update-bash-config
-
 .PHONY: uninstall
 uninstall:
-	-$(PIP_UNINSTALL) -y nni
-	-$(PIP_UNINSTALL) -y nnictl
+	-cd build && $(PIP_UNINSTALL) -y nni
+	-rm -rf build
 	-rm -rf $(NNI_PKG_FOLDER)
 	-rm -f $(BIN_FOLDER)/node
 	-rm -f $(BIN_FOLDER)/nnictl
@@ -157,8 +150,9 @@ install-dependencies: $(NNI_NODE_TARBALL) $(NNI_YARN_TARBALL)
 	mkdir $(NNI_NODE_FOLDER)
 	tar -xf $(NNI_NODE_TARBALL) -C $(NNI_NODE_FOLDER) --strip-components 1
 	mkdir -p $(BIN_FOLDER)
-	rm -f $(NNI_NODE)
-	cp $(NNI_NODE_FOLDER)/bin/node $(NNI_NODE)
+	rm -f $(NNI_NODE) $(NNI_NPM)
+	ln -s $(NNI_NODE_FOLDER)/bin/node $(NNI_NODE)
+	ln -s $(NNI_NODE_FOLDER)/bin/npm $(NNI_NPM)
 	
 	#$(_INFO) Extracting Yarn $(_END)
 	rm -rf $(NNI_YARN_FOLDER)
@@ -168,18 +162,25 @@ install-dependencies: $(NNI_NODE_TARBALL) $(NNI_YARN_TARBALL)
 .PHONY: install-python-modules
 install-python-modules:
 	#$(_INFO) Installing Python SDK $(_END)
-	cd src/sdk/pynni && sed -ie 's/$(NNI_VERSION_TEMPLATE)/$(NNI_VERSION_VALUE)/' setup.py && $(PIP_INSTALL) $(PIP_MODE) .
-	
-	#$(_INFO) Installing nnictl $(_END)
-	cd tools && sed -ie 's/$(NNI_VERSION_TEMPLATE)/$(NNI_VERSION_VALUE)/' setup.py && $(PIP_INSTALL) $(PIP_MODE) .
+	sed -ie 's/$(NNI_VERSION_TEMPLATE)/$(NNI_VERSION_VALUE)/' setup.py && $(PIP_INSTALL) $(PIP_MODE) .
 
 .PHONY: dev-install-python-modules
 dev-install-python-modules:
 	#$(_INFO) Installing Python SDK $(_END)
-	cd src/sdk/pynni && sed -ie 's/$(NNI_VERSION_TEMPLATE)/$(NNI_VERSION_VALUE)/' setup.py && $(PIP_INSTALL) $(PIP_MODE) -e .
-	
-	#$(_INFO) Installing nnictl $(_END)
-	cd tools && sed -ie 's/$(NNI_VERSION_TEMPLATE)/$(NNI_VERSION_VALUE)/' setup.py && $(PIP_INSTALL) $(PIP_MODE) -e .
+	mkdir -p build
+	ln -sf ../src/sdk/pynni/nni build/nni
+	ln -sf ../src/sdk/pynni/nnicli build/nnicli
+	ln -sf ../tools/nni_annotation build/nni_annotation
+	ln -sf ../tools/nni_cmd build/nni_cmd
+	ln -sf ../tools/nni_trial_tool build/nni_trial_tool
+	ln -sf ../tools/nni_gpu_tool build/nni_gpu_tool
+	cp setup.py build/
+	cp README.md build/
+	sed -ie 's/$(NNI_VERSION_TEMPLATE)/$(NNI_VERSION_VALUE)/' build/setup.py
+	sed -ie 's/src\/sdk\/pynni\/nni/nni/g' build/setup.py
+	sed -ie 's/tools\///g' build/setup.py
+	cd build && $(PIP_INSTALL) $(PIP_MODE) -e .
+
 
 .PHONY: install-node-modules
 install-node-modules:

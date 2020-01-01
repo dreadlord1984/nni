@@ -12,24 +12,20 @@ class LogPathChild extends React.Component<LogpathChildProps, {}> {
 
     }
 
-    render() {
+    render(): React.ReactNode {
         const { eachLogpath, logName } = this.props;
         const isLink = /^http/gi.test(eachLogpath);
 
         return (
-            <div>
+            <div className="logpath">
+                <span className="logName">{logName}</span>
                 {
                     isLink
                         ?
-                        <div className="logpath">
-                            <span className="logName">{logName}</span>
-                            <a className="logContent logHref" href={eachLogpath} target="_blank">{eachLogpath}</a>
-                        </div>
+                        <a className="logContent logHref" rel="noopener noreferrer" href={eachLogpath} target="_blank">{eachLogpath}</a>
                         :
-                        <div className="logpath">
-                            <span className="logName">{logName}</span>
-                            <span className="logContent">{eachLogpath}</span>
-                        </div>
+                        <span className="logContent">{eachLogpath}</span>
+
                 }
             </div>
         );

@@ -24,6 +24,7 @@ import random
 import numpy as np
 
 from nni.tuner import Tuner
+from nni.utils import extract_scalar_reward
 
 logger = logging.getLogger('ga_customer_tuner')
 
@@ -78,7 +79,7 @@ class CustomerTuner(Tuner):
         logger.debug('init population done.')
         return
 
-    def generate_parameters(self, parameter_id):
+    def generate_parameters(self, parameter_id, **kwargs):
         """Returns a set of trial graph config, as a serializable object.
         parameter_id : int
         """
@@ -108,14 +109,14 @@ class CustomerTuner(Tuner):
         return temp
 
 
-    def receive_trial_result(self, parameter_id, parameters, value):
+    def receive_trial_result(self, parameter_id, parameters, value, **kwargs):
         '''
         Record an observation of the objective function
         parameter_id : int
         parameters : dict of parameters
         value: final metrics of the trial, including reward
         '''
-        reward = self.extract_scalar_reward(value)
+        reward = extract_scalar_reward(value)
         if self.optimize_mode is OptimizeMode.Minimize:
             reward = -reward
 

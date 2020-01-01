@@ -1,27 +1,13 @@
-/**
- * Copyright (c) Microsoft Corporation
- * All rights reserved.
- *
- * MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
- * documentation files (the "Software"), to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
- * to permit persons to whom the Software is furnished to do so, subject to the following conditions:
- * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
- * BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
- * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- */
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
 
 'use strict';
 
 import * as assert from 'assert';
 import { randomBytes } from 'crypto';
 import * as cpp from 'child-process-promise';
+import * as cp from 'child_process';
+import { ChildProcess, spawn, StdioOptions } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -30,18 +16,22 @@ import { Container } from 'typescript-ioc';
 import * as util from 'util';
 
 import { Database, DataStore } from './datastore';
-import { ExperimentStartupInfo, getExperimentId, getExperimentStartupInfo, setExperimentStartupInfo } from './experimentStartupInfo';
-import { Manager } from './manager';
+import { ExperimentStartupInfo, getExperimentStartupInfo, setExperimentStartupInfo } from './experimentStartupInfo';
+import { ExperimentParams, Manager } from './manager';
 import { HyperParameters, TrainingService, TrialJobStatus } from './trainingService';
-import { getLogger } from './log';
 
 function getExperimentRootDir(): string {
     return getExperimentStartupInfo()
             .getLogDir();
 }
 
-function getLogDir(): string{
+function getLogDir(): string {
     return path.join(getExperimentRootDir(), 'log');
+}
+
+function getLogLevel(): string {
+    return getExperimentStartupInfo()
+    .getLogLevel();
 }
 
 function getDefaultDatabaseDir(): string {
@@ -126,7 +116,6 @@ function uniqueString(len: number): string {
 function randomSelect<T>(a: T[]): T {
     assert(a !== undefined);
 
-    // tslint:disable-next-line:insecure-random
     return a[Math.floor(Math.random() * a.length)];
 }
 function parseArg(names: string[]): string {
@@ -141,98 +130,36 @@ function parseArg(names: string[]): string {
     return '';
 }
 
+function getCmdPy(): string {
+    let cmd = 'python3';
+    if(process.platform === 'win32'){
+        cmd = 'python';
+    }
+    return cmd;
+}
+
 /**
- * Generate command line to start automl algorithm(s), 
+ * Generate command line to start automl algorithm(s),
  * either start advisor or start a process which runs tuner and assessor
- * @param tuner : For builtin tuner:
- *     {
- *         className: 'EvolutionTuner'
- *         classArgs: {
- *             optimize_mode: 'maximize',
- *             population_size: 3
- *         }
- *     }
- * customized:
- *     {
- *         codeDir: '/tmp/mytuner'
- *         classFile: 'best_tuner.py'
- *         className: 'BestTuner'
- *         classArgs: {
- *             optimize_mode: 'maximize',
- *             population_size: 3
- *         }
- *     }
  *
- * @param assessor: similiar as tuner
- * @param advisor: similar as tuner
+ * @param expParams: experiment startup parameters
  *
  */
-function getMsgDispatcherCommand(tuner: any, assessor: any, advisor: any, multiPhase: boolean = false, multiThread: boolean = false): string {
-    if ((tuner || assessor) && advisor) {
-        throw new Error('Error: specify both tuner/assessor and advisor is not allowed');
-    }
-    if (!tuner && !advisor) {
-        throw new Error('Error: specify neither tuner nor advisor is not allowed');
-    }
-
-    let command: string = `python3 -m nni`;
-    if (multiPhase) {
-        command += ' --multi_phase';
-    }
-
-    if (multiThread) {
-        command += ' --multi_thread';
-    }
-
-    if (advisor) {
-        command += ` --advisor_class_name ${advisor.className}`;
-        if (advisor.classArgs !== undefined) {
-            command += ` --advisor_args ${JSON.stringify(JSON.stringify(advisor.classArgs))}`;
-        }
-        if (advisor.codeDir !== undefined && advisor.codeDir.length > 1) {
-            command += ` --advisor_directory ${advisor.codeDir}`;
-        }
-        if (advisor.classFileName !== undefined && advisor.classFileName.length > 1) {
-            command += ` --advisor_class_filename ${advisor.classFileName}`;
-        }
-    } else {
-        command += ` --tuner_class_name ${tuner.className}`;
-        if (tuner.classArgs !== undefined) {
-            command += ` --tuner_args ${JSON.stringify(JSON.stringify(tuner.classArgs))}`;
-        }
-        if (tuner.codeDir !== undefined && tuner.codeDir.length > 1) {
-            command += ` --tuner_directory ${tuner.codeDir}`;
-        }
-        if (tuner.classFileName !== undefined && tuner.classFileName.length > 1) {
-            command += ` --tuner_class_filename ${tuner.classFileName}`;
-        }
-
-        if (assessor !== undefined && assessor.className !== undefined) {
-            command += ` --assessor_class_name ${assessor.className}`;
-            if (assessor.classArgs !== undefined) {
-                command += ` --assessor_args ${JSON.stringify(JSON.stringify(assessor.classArgs))}`;
-            }
-            if (assessor.codeDir !== undefined && assessor.codeDir.length > 1) {
-                command += ` --assessor_directory ${assessor.codeDir}`;
-            }
-            if (assessor.classFileName !== undefined && assessor.classFileName.length > 1) {
-                command += ` --assessor_class_filename ${assessor.classFileName}`;
-            }
-        }
-    }
-
-    return command;
+function getMsgDispatcherCommand(expParams: ExperimentParams): string {
+    const clonedParams = Object.assign({}, expParams);
+    delete clonedParams.searchSpace;
+    return `${getCmdPy()} -m nni --exp_params ${Buffer.from(JSON.stringify(clonedParams)).toString('base64')}`;
 }
 
 /**
  * Generate parameter file name based on HyperParameters object
  * @param hyperParameters HyperParameters instance
  */
-function generateParamFileName(hyperParameters : HyperParameters): string {
+function generateParamFileName(hyperParameters: HyperParameters): string {
     assert(hyperParameters !== undefined);
     assert(hyperParameters.index >= 0);
 
-    let paramFileName : string;
+    let paramFileName: string;
     if(hyperParameters.index == 0) {
         paramFileName = 'parameter.cfg';
     } else {
@@ -275,7 +202,7 @@ function cleanupUnitTest(): void {
     Container.restore(ExperimentStartupInfo);
 }
 
-let cachedipv4Address : string = '';
+let cachedipv4Address: string = '';
 /**
  * Get IPv4 address of current machine
  */
@@ -317,15 +244,15 @@ function getJobCancelStatus(isEarlyStopped: boolean): TrialJobStatus {
  * Utility method to calculate file numbers under a directory, recursively
  * @param directory directory name
  */
-function countFilesRecursively(directory: string, timeoutMilliSeconds?: number): Promise<number> {
+function countFilesRecursively(directory: string): Promise<number> {
     if(!fs.existsSync(directory)) {
         throw Error(`Direcotory ${directory} doesn't exist`);
     }
 
     const deferred: Deferred<number> = new Deferred<number>();
 
-    let timeoutId : NodeJS.Timer
-    const delayTimeout : Promise<number> = new Promise((resolve : Function, reject : Function) : void => {
+    let timeoutId: NodeJS.Timer
+    const delayTimeout: Promise<number> = new Promise((resolve: Function, reject: Function): void => {
         // Set timeout and reject the promise once reach timeout (5 seconds)
         timeoutId = setTimeout(() => {
             reject(new Error(`Timeout: path ${directory} has too many files`));
@@ -333,18 +260,158 @@ function countFilesRecursively(directory: string, timeoutMilliSeconds?: number):
     });
 
     let fileCount: number = -1;
-    cpp.exec(`find ${directory} -type f | wc -l`).then((result) => {
+    let cmd: string;
+    if(process.platform === "win32") {
+        cmd = `powershell "Get-ChildItem -Path ${directory} -Recurse -File | Measure-Object | %{$_.Count}"`
+    } else {
+        cmd = `find ${directory} -type f | wc -l`;
+    }
+    cpp.exec(cmd).then((result) => {
         if(result.stdout && parseInt(result.stdout)) {
-            fileCount = parseInt(result.stdout);            
+            fileCount = parseInt(result.stdout);
         }
         deferred.resolve(fileCount);
     });
-
     return Promise.race([deferred.promise, delayTimeout]).finally(() => {
         clearTimeout(timeoutId);
     });
 }
 
-export {countFilesRecursively, getRemoteTmpDir, generateParamFileName, getMsgDispatcherCommand, getCheckpointDir,
-    getLogDir, getExperimentRootDir, getJobCancelStatus, getDefaultDatabaseDir, getIPV4Address, 
-    mkDirP, delay, prepareUnitTest, parseArg, cleanupUnitTest, uniqueString, randomSelect };
+function validateFileName(fileName: string): boolean {
+    const pattern: string = '^[a-z0-9A-Z._-]+$';
+    const validateResult = fileName.match(pattern);
+    if(validateResult) {
+        return true;
+    }
+    return false;
+}
+
+async function validateFileNameRecursively(directory: string): Promise<boolean> {
+    if(!fs.existsSync(directory)) {
+        throw Error(`Direcotory ${directory} doesn't exist`);
+    }
+
+    const fileNameArray: string[] = fs.readdirSync(directory);
+    let result = true;
+    for(const name of fileNameArray){
+        const fullFilePath: string = path.join(directory, name);
+        try {
+            // validate file names and directory names
+            result = validateFileName(name);
+            if (fs.lstatSync(fullFilePath).isDirectory()) {
+                result = result && await validateFileNameRecursively(fullFilePath);
+            }
+            if(!result) {
+                return Promise.reject(new Error(`file name in ${fullFilePath} is not valid!`));
+            }
+        } catch(error) {
+            return Promise.reject(error);
+        }
+    }
+    return Promise.resolve(result);   
+}
+
+/**
+ * get the version of current package
+ */
+async function getVersion(): Promise<string> {
+    const deferred: Deferred<string> = new Deferred<string>();
+    import(path.join(__dirname, '..', 'package.json')).then((pkg)=>{
+        deferred.resolve(pkg.version);
+    }).catch((error)=>{
+        deferred.reject(error);
+    });
+    return deferred.promise;
+}
+
+/**
+ * run command as ChildProcess
+ */
+function getTunerProc(command: string, stdio: StdioOptions, newCwd: string, newEnv: any): ChildProcess {
+    let cmd: string = command;
+    let arg: string[] = [];
+    let newShell: boolean = true;
+    if(process.platform === "win32"){
+        cmd = command.split(" ", 1)[0];
+        arg = command.substr(cmd.length+1).split(" ");
+        newShell = false;
+    }
+    const tunerProc: ChildProcess = spawn(cmd, arg, {
+        stdio,
+        cwd: newCwd,
+        env: newEnv,
+        shell: newShell
+    });
+    return tunerProc;
+}
+
+/**
+ * judge whether the process is alive
+ */
+async function isAlive(pid: any): Promise<boolean> {
+    const deferred: Deferred<boolean> = new Deferred<boolean>();
+    let alive: boolean = false;
+    if (process.platform === 'win32') {
+        try {
+            const str = cp.execSync(`powershell.exe Get-Process -Id ${pid} -ErrorAction SilentlyContinue`).toString();
+            if (str) {
+                alive = true;
+            }
+        }
+        catch (error) {
+            //ignore
+        }
+    }
+    else {
+        try {
+            await cpp.exec(`kill -0 ${pid}`);
+            alive = true;
+        } catch (error) {
+            //ignore
+        }
+    }
+    deferred.resolve(alive);
+    return deferred.promise;
+}
+
+/**
+ * kill process
+ */
+async function killPid(pid: any): Promise<void> {
+    const deferred: Deferred<void> = new Deferred<void>();
+    try {
+        if (process.platform === "win32") {
+            await cpp.exec(`cmd.exe /c taskkill /PID ${pid} /F`);
+        }
+        else{
+            await cpp.exec(`kill -9 ${pid}`);
+        }
+    } catch (error) {
+        // pid does not exist, do nothing here
+    }
+    deferred.resolve();
+    return deferred.promise;
+}
+
+function getNewLine(): string {
+    if (process.platform === "win32") {
+        return "\r\n";
+    }
+    else{
+        return "\n";
+    }
+}
+
+/**
+ * Use '/' to join path instead of '\' for all kinds of platform
+ * @param path
+ */
+function unixPathJoin(...paths: any[]): string {
+    const dir: string = paths.filter((path: any) => path !== '').join('/');
+    if (dir === '') return '.';
+    return dir;
+}
+
+export {countFilesRecursively, validateFileNameRecursively, getRemoteTmpDir, generateParamFileName, getMsgDispatcherCommand, getCheckpointDir,
+    getLogDir, getExperimentRootDir, getJobCancelStatus, getDefaultDatabaseDir, getIPV4Address, unixPathJoin,
+    mkDirP, mkDirPSync, delay, prepareUnitTest, parseArg, cleanupUnitTest, uniqueString, randomSelect, getLogLevel, getVersion, getCmdPy, getTunerProc, isAlive, killPid, getNewLine };

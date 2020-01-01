@@ -28,7 +28,7 @@ author = 'Microsoft'
 # The short X.Y version
 version = ''
 # The full version, including alpha/beta/rc tags
-release = 'v0.5.1'
+release = 'v1.2'
 
 # -- General configuration ---------------------------------------------------
 
@@ -96,7 +96,7 @@ html_theme_options = {
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-# html_static_path = ['_static']
+html_static_path = ['../static']
 
 # Custom sidebar templates, must be a dictionary that maps document names
 # to template names.
@@ -186,9 +186,10 @@ epub_exclude_files = ['search.html']
 
 
 # -- Extension configuration -------------------------------------------------
-github_doc_root = 'https://github.com/Microsoft/nni/tree/master/doc/'
 def setup(app):
     app.add_config_value('recommonmark_config', {
-        'enable_auto_toc_tree': True,
-    }, True)
+        'enable_eval_rst': True,
+        'enable_auto_toc_tree': False,
+            }, True)
     app.add_transform(AutoStructify)
+    app.add_stylesheet('css/custom.css')

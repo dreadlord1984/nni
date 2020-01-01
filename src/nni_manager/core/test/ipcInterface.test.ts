@@ -1,28 +1,12 @@
-/**
- * Copyright (c) Microsoft Corporation
- * All rights reserved.
- *
- * MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
- * documentation files (the "Software"), to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
- * to permit persons to whom the Software is furnished to do so, subject to the following conditions:
- * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
- * BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
- * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- */
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
 
 'use strict';
 
 import * as assert from 'assert';
 import { ChildProcess, spawn, StdioOptions } from 'child_process';
 import { Deferred } from 'ts-deferred';
-import { cleanupUnitTest, prepareUnitTest } from '../../common/utils';
+import { cleanupUnitTest, prepareUnitTest, getTunerProc, getCmdPy } from '../../common/utils';
 import * as CommandType from '../commands';
 import { createDispatcherInterface, IpcInterface } from '../ipcInterface';
 import { NNIError } from '../../common/errors';
@@ -39,15 +23,21 @@ function runProcess(): Promise<Error | null> {
 
     // create fake assessor process
     const stdio: StdioOptions = ['ignore', 'pipe', process.stderr, 'pipe', 'pipe'];
-    const proc: ChildProcess = spawn('python3 assessor.py', [], { stdio, cwd: 'core/test', shell: true });
-
+    const command: string = getCmdPy() + ' assessor.py';
+    const proc: ChildProcess = getTunerProc(command, stdio,  'core/test', process.env);
     // record its sent/received commands on exit
     proc.on('error', (error: Error): void => { deferred.resolve(error); });
     proc.on('exit', (code: number): void => {
         if (code !== 0) {
             deferred.resolve(new Error(`return code: ${code}`));
         } else {
-            sentCommands = proc.stdout.read().toString().split('\n');
+            let str = proc.stdout.read().toString();
+            if(str.search("\r\n")!=-1){
+                sentCommands = str.split("\r\n");
+            }
+            else{
+                sentCommands = str.split('\n');
+            }
             deferred.resolve(null);
         }
     });
@@ -71,7 +61,7 @@ function runProcess(): Promise<Error | null> {
         commandTooLong = error;
     }
 
-    // Command #4: FE is not tuner/assessor command, test the exception type of send non-valid command 
+    // Command #4: FE is not tuner/assessor command, test the exception type of send non-valid command
     try {
         dispatcher.sendCommand('FE', '1');
     } catch (error) {

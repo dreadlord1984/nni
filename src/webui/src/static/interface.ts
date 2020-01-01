@@ -8,6 +8,27 @@ interface TableObj {
     acc?: FinalType; // draw accuracy graph
     description: Parameters;
     color?: string;
+    startTime?: number;
+    endTime?: number;
+}
+
+interface TableRecord {
+    key: string;
+    sequenceId: number;
+    startTime: number;
+    endTime?: number;
+    id: string;
+    duration: number;
+    status: string;
+    intermediateCount: number;
+    accuracy?: number;
+    latestAccuracy: number | undefined;
+    formattedLatestAccuracy: string; // format (LATEST/FINAL)
+}
+
+interface SearchSpace {
+    _value: Array<number | string>;
+    _type: string;
 }
 
 interface FinalType {
@@ -21,25 +42,8 @@ interface ErrorParameter {
 interface Parameters {
     parameters: ErrorParameter;
     logPath?: string;
-}
-
-interface Experiment {
-    id: string;
-    author: string;
-    revision?: number;
-    experName: string;
-    logDir?: string;
-    runConcurren: number;
-    maxDuration: number;
-    execDuration: number;
-    MaxTrialNum: number;
-    startTime: number;
-    endTime?: number;
-    trainingServicePlatform: string;
-    tuner: object;
-    assessor?: object;
-    advisor?: object;
-    clusterMetaData?: object;
+    intermediate: number[];
+    multiProgress?: number;
 }
 
 // trial accuracy
@@ -51,26 +55,17 @@ interface AccurPoint {
 interface DetailAccurPoint {
     acc: number;
     index: number;
-    searchSpace: string;
+    searchSpace: object;
+}
+
+interface TooltipForIntermediate {
+    data: string;
+    seriesName: string;
+    dataIndex: number;
 }
 
 interface TooltipForAccuracy {
     data: Array<number | object>;
-}
-
-interface TrialNumber {
-    succTrial: number;
-    failTrial: number;
-    stopTrial: number;
-    waitTrial: number;
-    runTrial: number;
-    unknowTrial: number;
-    totalCurrentTrial: number;
-}
-
-interface TrialJob {
-    text: string;
-    value: string;
 }
 
 interface Dimobj {
@@ -80,6 +75,12 @@ interface Dimobj {
     min?: number;
     type?: string;
     data?: string[];
+    boundaryGap?: boolean;
+    axisTick?: object;
+    axisLabel?: object;
+    axisLine?: object;
+    nameTextStyle?: object;
+    scale?: boolean;
 }
 
 interface ParaObj {
@@ -87,18 +88,104 @@ interface ParaObj {
     parallelAxis: Array<Dimobj>;
 }
 
-interface VisualMapValue {
-    maxAccuracy: number;
-    minAccuracy: number;
+interface Intermedia {
+    name: string; // id
+    type: string;
+    data: Array<number | object>; // intermediate data
+    hyperPara: object; // each trial hyperpara value
 }
 
-interface FinalResult {
+interface MetricDataRecord {
+    timestamp: number;
+    trialJobId: string;
+    parameterId: string;
+    type: string;
+    sequence: number;
     data: string;
 }
 
+interface TrialJobInfo {
+    id: string;
+    sequenceId: number;
+    status: string;
+    startTime?: number;
+    endTime?: number;
+    hyperParameters?: string[];
+    logPath?: string;
+    finalMetricData?: MetricDataRecord[];
+    stderrPath?: string;
+}
+
+interface ExperimentParams {
+    authorName: string;
+    experimentName: string;
+    description?: string;
+    trialConcurrency: number;
+    maxExecDuration: number; // seconds
+    maxTrialNum: number;
+    searchSpace: string;
+    trainingServicePlatform: string;
+    multiPhase?: boolean;
+    multiThread?: boolean;
+    versionCheck?: boolean;
+    logCollection?: string;
+    tuner?: {
+        className: string;
+        builtinTunerName?: string;
+        codeDir?: string;
+        classArgs?: any;
+        classFileName?: string;
+        checkpointDir: string;
+        gpuNum?: number;
+        includeIntermediateResults?: boolean;
+    };
+    assessor?: {
+        className: string;
+        builtinAssessorName?: string;
+        codeDir?: string;
+        classArgs?: any;
+        classFileName?: string;
+        checkpointDir: string;
+        gpuNum?: number;
+    };
+    advisor?: {
+        className: string;
+        builtinAdvisorName?: string;
+        codeDir?: string;
+        classArgs?: any;
+        classFileName?: string;
+        checkpointDir: string;
+        gpuNum?: number;
+    };
+    clusterMetaData?: {
+        key: string;
+        value: string;
+    }[];
+}
+
+interface ExperimentProfile {
+    params: ExperimentParams;
+    id: string;
+    execDuration: number;
+    logDir?: string;
+    startTime?: number;
+    endTime?: number;
+    maxSequenceId: number;
+    revision: number;
+}
+
+interface NNIManagerStatus {
+    status: string;
+    errors: string[];
+}
+
+interface EventMap {
+    [key: string]: () => void;
+}
+
 export {
-    TableObj, Parameters, Experiment, 
-    AccurPoint, TrialNumber, TrialJob,
-    DetailAccurPoint, TooltipForAccuracy,
-    ParaObj, VisualMapValue, Dimobj, FinalResult, FinalType
+    TableObj, TableRecord, Parameters, ExperimentProfile, AccurPoint,
+    DetailAccurPoint, TooltipForAccuracy, ParaObj, Dimobj, FinalType,
+    TooltipForIntermediate, SearchSpace, Intermedia, MetricDataRecord, TrialJobInfo,
+    NNIManagerStatus, EventMap
 };

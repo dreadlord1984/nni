@@ -1,37 +1,11 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
-#
-# MIT License
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
-# associated documentation files (the "Software"), to deal in the Software without restriction,
-# including without limitation the rights to use, copy, modify, merge, publish, distribute,
-# sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all copies or
-# substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
-# NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
-# OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-# ==================================================================================================
-
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT license.
 
 import os
 from setuptools import setup, find_packages
-from setuptools.command.install import install
-import subprocess
 
 def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname), encoding='utf-8').read()
-
-class CustomInstallCommand(install):
-    '''a customized install class in pip module'''
-    def run(self):
-        super().run()
-        subprocess.run(['make', 'pip-install'], check=True)
 
 setup(
     name = 'nni',
@@ -43,9 +17,10 @@ setup(
     license = 'MIT',
     url = 'https://github.com/Microsoft/nni',
 
-    packages = find_packages('src/sdk/pynni', exclude=['tests']) + find_packages('tools'),
+    packages = find_packages('src/sdk/pynni', exclude=['tests']) + find_packages('src/sdk/pycli') + find_packages('tools'),
     package_dir = {
         'nni': 'src/sdk/pynni/nni',
+        'nnicli': 'src/sdk/pycli/nnicli',
         'nni_annotation': 'tools/nni_annotation',
         'nni_cmd': 'tools/nni_cmd',
         'nni_trial_tool':'tools/nni_trial_tool',
@@ -55,18 +30,22 @@ setup(
     python_requires = '>=3.5',
     install_requires = [
         'astor',
-        'hyperopt',
+        'hyperopt==0.1.2',
         'json_tricks',
         'numpy',
         'psutil',
-        'pyyaml',
+        'ruamel.yaml',
         'requests',
         'scipy',
         'schema',
-        'PythonWebHDFS'
+        'PythonWebHDFS',
+        'colorama',
+        'scikit-learn>=0.20,<0.22'
     ],
 
-    cmdclass={
-        'install': CustomInstallCommand
+    entry_points = {
+        'console_scripts' : [
+            'nnictl = nni_cmd.nnictl:parse_args'
+        ]
     }
 )

@@ -1,6 +1,5 @@
-Advanced Features 
+Advanced Features
 =====================
 
 ..  toctree::
-    MultiPhase<multiPhase>
-    AdvancedNAS
+    MultiPhase<./AdvancedFeature/MultiPhase>

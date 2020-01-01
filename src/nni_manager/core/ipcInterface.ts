@@ -1,21 +1,5 @@
-/**
- * Copyright (c) Microsoft Corporation
- * All rights reserved.
- *
- * MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
- * documentation files (the "Software"), to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
- * to permit persons to whom the Software is furnished to do so, subject to the following conditions:
- * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
- * BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
- * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- */
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
 
 'use strict';
 
@@ -25,6 +9,7 @@ import { EventEmitter } from 'events';
 import { Readable, Writable } from 'stream';
 import { NNIError } from '../common/errors';
 import { getLogger, Logger } from '../common/log';
+import { getLogDir } from '../common/utils';
 import * as CommandType from './commands';
 
 const ipcOutgoingFd: number = 3;
@@ -89,6 +74,8 @@ class IpcInterface {
         this.readBuffer = Buffer.alloc(0);
 
         this.incomingStream.on('data', (data: Buffer) => { this.receive(data); });
+        this.incomingStream.on('error', (error: Error) => { this.eventEmitter.emit('error', error); });
+        this.outgoingStream.on('error', (error: Error) => { this.eventEmitter.emit('error', error); });
     }
 
     /**
@@ -106,7 +93,10 @@ class IpcInterface {
                 this.logger.warning('Commands jammed in buffer!');
             }
         } catch (err) {
-            throw new NNIError('Dispatcher Error', `Dispatcher Error: ${err.message}`, err);
+            throw NNIError.FromError(
+                err,
+                `Dispatcher Error, please check this dispatcher log file for more detailed information: ${getLogDir()}/dispatcher.log . `
+            );
         }
     }
 
@@ -116,6 +106,10 @@ class IpcInterface {
      */
     public onCommand(listener: (commandType: string, content: string) => void): void {
         this.eventEmitter.on('command', listener);
+    }
+
+    public onError(listener: (error: Error) => void): void {
+        this.eventEmitter.on('error', listener);
     }
 
     /**

@@ -13,13 +13,13 @@ class SearchSpace extends React.Component<SearchspaceProps, {}> {
 
     }
 
-    render() {
+    render(): React.ReactNode {
         const { searchSpace } = this.props;
         return (
             <div className="searchSpace">
                 <MonacoEditor
                     width="100%"
-                    height="380"
+                    height="361"
                     language="json"
                     theme="vs-light"
                     value={JSON.stringify(searchSpace, null, 2)}

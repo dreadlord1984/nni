@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 CWD=${PWD}
 
 # -------------For python unittest-------------
@@ -19,9 +20,7 @@ echo "===========================Testing: nni_sdk==========================="
 cd ${CWD}/../src/sdk/pynni/
 python3 -m unittest discover -v tests
 
-
-
-# -------------For typescrip unittest-------------
+# -------------For typescript unittest-------------
 cd ${CWD}/../src/nni_manager
 echo ""
 echo "===========================Testing: nni_manager==========================="

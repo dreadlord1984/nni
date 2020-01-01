@@ -1,456 +1,158 @@
 import * as React from 'react';
-import axios from 'axios';
-import { MANAGER_IP } from '../static/const';
-import { Row, Col, Tabs, Input, Select, Button } from 'antd';
+import { Row, Col, Tabs, Select, Button, Icon } from 'antd';
 const Option = Select.Option;
-import { TableObj, Parameters, DetailAccurPoint, TooltipForAccuracy } from '../static/interface';
-import { getFinalResult, getFinal } from '../static/function';
-import Accuracy from './overview/Accuracy';
+import { EXPERIMENT, TRIALS } from '../static/datamodel';
+import { Trial } from '../static/model/trial';
+import DefaultPoint from './trial-detail/DefaultMetricPoint';
 import Duration from './trial-detail/Duration';
 import Title1 from './overview/Title1';
 import Para from './trial-detail/Para';
+import Intermediate from './trial-detail/Intermediate';
 import TableList from './trial-detail/TableList';
 const TabPane = Tabs.TabPane;
 import '../static/style/trialsDetail.scss';
+import '../static/style/search.scss';
 
 interface TrialDetailState {
-    accSource: object;
-    accNodata: string;
-    tableListSource: Array<TableObj>;
-    searchResultSource: Array<TableObj>;
-    isHasSearch: boolean;
-    experimentStatus: string;
-    entriesTable: number;
-    experimentPlatform: string;
+    tablePageSize: number; // table components val
+    whichGraph: string;
+    searchType: string;
+    searchFilter: (trial: Trial) => boolean;
 }
 
-class TrialsDetail extends React.Component<{}, TrialDetailState> {
+interface TrialsDetailProps {
+    columnList: Array<string>;
+    changeColumn: (val: Array<string>) => void;
+    experimentUpdateBroacast: number;
+    trialsUpdateBroadcast: number;
+}
 
-    public _isMounted = false;
+class TrialsDetail extends React.Component<TrialsDetailProps, TrialDetailState> {
+
     public interAccuracy = 0;
-    public interTableList = 1;
     public interAllTableList = 2;
 
     public tableList: TableList | null;
+    public searchInput: HTMLInputElement | null;
 
-    constructor(props: {}) {
+    private titleOfacc = (
+        <Title1 text="Default metric" icon="3.png" />
+    );
+
+    private titleOfhyper = (
+        <Title1 text="Hyper-parameter" icon="1.png" />
+    );
+
+    private titleOfDuration = (
+        <Title1 text="Trial duration" icon="2.png" />
+    );
+
+    private titleOfIntermediate = (
+        <div className="panelTitle">
+            <Icon type="line-chart" />
+            <span>Intermediate result</span>
+        </div>
+    );
+
+    constructor(props: TrialsDetailProps) {
         super(props);
-
         this.state = {
-            accSource: {},
-            accNodata: '',
-            tableListSource: [],
-            searchResultSource: [],
-            experimentStatus: '',
-            entriesTable: 20,
-            isHasSearch: false,
-            experimentPlatform: ''
+            tablePageSize: 20,
+            whichGraph: '1',
+            searchType: 'id',
+            // eslint-disable-next-line @typescript-eslint/explicit-function-return-type, @typescript-eslint/no-unused-vars
+            searchFilter: trial => true 
         };
-    }
-    // trial accuracy graph
-    drawPointGraph = () => {
-
-        axios(`${MANAGER_IP}/trial-jobs`, {
-            method: 'GET'
-        })
-            .then(res => {
-                if (res.status === 200 && this._isMounted) {
-                    const accData = res.data;
-                    const accSource: Array<DetailAccurPoint> = [];
-                    Object.keys(accData).map(item => {
-                        if (accData[item].status === 'SUCCEEDED' && accData[item].finalMetricData) {
-                            let searchSpace: object = {};
-                            const acc = getFinalResult(accData[item].finalMetricData);
-                            if (accData[item].hyperParameters) {
-                                searchSpace = JSON.parse(accData[item].hyperParameters).parameters;
-                            }
-                            accSource.push({
-                                acc: acc,
-                                index: accData[item].sequenceId,
-                                searchSpace: JSON.stringify(searchSpace)
-                            });
-                        }
-                    });
-                    const resultList: Array<number | string>[] = [];
-                    Object.keys(accSource).map(item => {
-                        const items = accSource[item];
-                        let temp: Array<number | string>;
-                        temp = [items.index, items.acc, JSON.parse(items.searchSpace)];
-                        resultList.push(temp);
-                    });
-                    const allAcuracy = {
-                        tooltip: {
-                            trigger: 'item',
-                            enterable: true,
-                            position: function (point: Array<number>, data: TooltipForAccuracy) {
-                                if (data.data[0] < resultList.length / 2) {
-                                    return [point[0], 80];
-                                } else {
-                                    return [point[0] - 300, 80];
-                                }
-                            },
-                            formatter: function (data: TooltipForAccuracy) {
-                                const result = '<div class="tooldetailAccuracy">' +
-                                    '<div>Trial No: ' + data.data[0] + '</div>' +
-                                    '<div>Default Metrc: ' + data.data[1] + '</div>' +
-                                    '<div>Parameters: ' +
-                                    '<pre>' + JSON.stringify(data.data[2], null, 4) + '</pre>' +
-                                    '</div>' +
-                                    '</div>';
-                                return result;
-                            }
-                        },
-                        xAxis: {
-                            name: 'Trial',
-                            type: 'category',
-                        },
-                        yAxis: {
-                            name: 'Default Metric',
-                            type: 'value',
-                        },
-                        series: [{
-                            symbolSize: 6,
-                            type: 'scatter',
-                            data: resultList
-                        }]
-                    };
-
-                    this.setState({ accSource: allAcuracy }, () => {
-                        if (resultList.length === 0) {
-                            this.setState({
-                                accNodata: 'No data'
-                            });
-                        } else {
-                            this.setState({
-                                accNodata: ''
-                            });
-                        }
-                    });
-                }
-            });
-    }
-
-    drawTableList = () => {
-        this.isOffIntervals();
-        axios.get(`${MANAGER_IP}/trial-jobs`)
-            .then(res => {
-                if (res.status === 200) {
-                    const trialJobs = res.data;
-                    const trialTable: Array<TableObj> = [];
-                    Object.keys(trialJobs).map(item => {
-                        // only succeeded trials have finalMetricData
-                        let desc: Parameters = {
-                            parameters: {}
-                        };
-                        let duration = 0;
-                        const id = trialJobs[item].id !== undefined
-                            ? trialJobs[item].id
-                            : '';
-                        const status = trialJobs[item].status !== undefined
-                            ? trialJobs[item].status
-                            : '';
-                        const begin = trialJobs[item].startTime;
-                        const end = trialJobs[item].endTime;
-                        if (begin) {
-                            if (end) {
-                                duration = (end - begin) / 1000;
-                            } else {
-                                duration = (new Date().getTime() - begin) / 1000;
-                            }
-                        }
-                        if (trialJobs[item].hyperParameters !== undefined) {
-                            const getPara = JSON.parse(trialJobs[item].hyperParameters[0]).parameters;
-                            if (typeof getPara === 'string') {
-                                desc.parameters = JSON.parse(getPara);
-                            } else {
-                                desc.parameters = getPara;
-                            }
-                        } else {
-                            desc.parameters = { error: 'This trial\'s parameters are not available.' };
-                        }
-                        if (trialJobs[item].logPath !== undefined) {
-                            desc.logPath = trialJobs[item].logPath;
-                        }
-                        const acc = getFinal(trialJobs[item].finalMetricData);
-                        trialTable.push({
-                            key: trialTable.length,
-                            sequenceId: trialJobs[item].sequenceId,
-                            id: id,
-                            status: status,
-                            duration: duration,
-                            acc: acc,
-                            description: desc
-                        });
-                    });
-                    // search part data
-                    const { searchResultSource } = this.state;
-                    if (searchResultSource.length !== 0) {
-                        const temp: Array<number> = [];
-                        Object.keys(searchResultSource).map(index => {
-                            temp.push(searchResultSource[index].id);
-                        });
-                        const searchResultList: Array<TableObj> = [];
-                        for (let i = 0; i < temp.length; i++) {
-                            Object.keys(trialTable).map(key => {
-                                const item = trialTable[key];
-                                if (item.id === temp[i]) {
-                                    searchResultList.push(item);
-                                }
-                            });
-                        }
-
-                        if (this._isMounted) {
-                            this.setState(() => ({
-                                searchResultSource: searchResultList
-                            }));
-                        }
-                    }
-                    if (this._isMounted) {
-                        this.setState(() => ({
-                            tableListSource: trialTable
-                        }));
-                    }
-                }
-            });
-    }
-
-    // update all data in table
-    drawAllTableList = () => {
-        this.isOffIntervals();
-        axios.get(`${MANAGER_IP}/trial-jobs`)
-            .then(res => {
-                if (res.status === 200) {
-                    const trialJobs = res.data;
-                    const trialTable: Array<TableObj> = [];
-                    Object.keys(trialJobs).map(item => {
-                        // only succeeded trials have finalMetricData
-                        let desc: Parameters = {
-                            parameters: {}
-                        };
-                        let duration = 0;
-                        const id = trialJobs[item].id !== undefined
-                            ? trialJobs[item].id
-                            : '';
-                        const status = trialJobs[item].status !== undefined
-                            ? trialJobs[item].status
-                            : '';
-                        const begin = trialJobs[item].startTime;
-                        const end = trialJobs[item].endTime;
-                        if (begin) {
-                            if (end) {
-                                duration = (end - begin) / 1000;
-                            } else {
-                                duration = (new Date().getTime() - begin) / 1000;
-                            }
-                        }
-                        if (trialJobs[item].hyperParameters !== undefined) {
-                            const getPara = JSON.parse(trialJobs[item].hyperParameters[0]).parameters;
-                            if (typeof getPara === 'string') {
-                                desc.parameters = JSON.parse(getPara);
-                            } else {
-                                desc.parameters = getPara;
-                            }
-                        } else {
-                            desc.parameters = { error: 'This trial\'s parameters are not available.' };
-                        }
-                        if (trialJobs[item].logPath !== undefined) {
-                            desc.logPath = trialJobs[item].logPath;
-                        }
-                        const acc = getFinal(trialJobs[item].finalMetricData);
-                        trialTable.push({
-                            key: trialTable.length,
-                            sequenceId: trialJobs[item].sequenceId,
-                            id: id,
-                            status: status,
-                            duration: duration,
-                            acc: acc,
-                            description: desc
-                        });
-                    });
-                    if (this._isMounted) {
-                        this.setState(() => ({
-                            tableListSource: trialTable,
-                            searchResultSource: trialTable
-                        }));
-                    }
-                }
-            });
-    }
-
-    callback = (key: string) => {
-
-        switch (key) {
-            case '1':
-                window.clearInterval(Para.intervalIDPara);
-                window.clearInterval(Duration.intervalDuration);
-                this.drawPointGraph();
-                this.interAccuracy = window.setInterval(this.drawPointGraph, 10000);
-                break;
-
-            case '2':
-                this.isOffIntervals();
-                window.clearInterval(this.interAccuracy);
-                window.clearInterval(Duration.intervalDuration);
-                break;
-
-            case '3':
-                this.isOffIntervals();
-                window.clearInterval(this.interAccuracy);
-                window.clearInterval(Para.intervalIDPara);
-                break;
-
-            default:
-        }
     }
 
     // search a trial by trial No. & trial id
-    searchTrial = (event: React.ChangeEvent<HTMLInputElement>) => {
+    searchTrial = (event: React.ChangeEvent<HTMLInputElement>): void => {
         const targetValue = event.target.value;
-        if (targetValue === '' || targetValue === ' ') {
-            this.drawAllTableList();
-            this.interAllTableList = window.setInterval(this.drawAllTableList, 10000);
-        } else {
-            window.clearInterval(this.interAllTableList);
-            const { tableListSource } = this.state;
-            const searchResultList: Array<TableObj> = [];
-            Object.keys(tableListSource).map(key => {
-                const item = tableListSource[key];
-                if (item.sequenceId.toString() === targetValue || item.id.includes(targetValue)) {
-                    searchResultList.push(item);
-                }
-            });
-            if (this._isMounted) {
-                this.setState(() => ({
-                    searchResultSource: searchResultList,
-                    isHasSearch: true
-                }));
-            }
+        // eslint-disable-next-line @typescript-eslint/explicit-function-return-type, @typescript-eslint/no-unused-vars
+        let filter = (trial: Trial) => true;
+        if (!targetValue.trim()) {
+            this.setState({ searchFilter: filter });
+            return;
         }
-    }
-
-    isOffIntervals = () => {
-        axios(`${MANAGER_IP}/check-status`, {
-            method: 'GET'
-        })
-            .then(res => {
-                if (res.status === 200 && this._isMounted) {
-                    switch (res.data.status) {
-                        case 'DONE':
-                        case 'ERROR':
-                        case 'STOPPED':
-                            window.clearInterval(this.interAccuracy);
-                            window.clearInterval(this.interTableList);
-                            window.clearInterval(Duration.intervalDuration);
-                            window.clearInterval(Para.intervalIDPara);
-                            window.clearInterval(this.interAllTableList);
-                            break;
-                        default:
-                    }
-                }
-            });
-    }
-
-    handleEntriesSelect = (value: string) => {
-        switch (value) {
-            case '20':
-                this.setState(() => ({ entriesTable: 20 }));
+        switch (this.state.searchType) {
+            case 'id':
+                filter = (trial): boolean => trial.info.id.toUpperCase().includes(targetValue.toUpperCase());
                 break;
-            case '50':
-                this.setState(() => ({ entriesTable: 50 }));
+            case 'Trial No.':
+                filter = (trial): boolean => trial.info.sequenceId.toString() === targetValue;
                 break;
-            case '100':
-                this.setState(() => ({ entriesTable: 100 }));
+            case 'status':
+                filter = (trial): boolean => trial.info.status.toUpperCase().includes(targetValue.toUpperCase());
                 break;
-            case 'all':
-                this.setState(() => ({ entriesTable: 100000 }));
+            case 'parameters':
+                // TODO: support filters like `x: 2` (instead of `"x": 2`)
+                filter = (trial): boolean => JSON.stringify(trial.info.hyperParameters, null, 4).includes(targetValue);
                 break;
             default:
+                alert(`Unexpected search filter ${this.state.searchType}`);
         }
+        this.setState({ searchFilter: filter });
     }
 
-    test = () => {
-        alert('TableList component was not properly initialized.');
+    handleTablePageSizeSelect = (value: string): void => {
+        this.setState({ tablePageSize: value === 'all' ? -1 : parseInt(value, 10) });
     }
 
-    checkExperimentPlatform = () => {
-        axios(`${MANAGER_IP}/experiment`, {
-            method: 'GET'
-        })
-            .then(res => {
-                if (res.status === 200) {
-                    const trainingPlatform = res.data.params.trainingServicePlatform !== undefined
-                    ?
-                    res.data.params.trainingServicePlatform
-                    :
-                    '';
-                    if (this._isMounted) {
-                        this.setState({
-                            experimentPlatform: trainingPlatform
-                        });
-                    }
-                }
-            });
+    handleWhichTabs = (activeKey: string): void => {
+        this.setState({ whichGraph: activeKey });
     }
 
-    componentDidMount() {
-
-        this._isMounted = true;
-        this.drawTableList();
-        this.drawPointGraph();
-        this.interTableList = window.setInterval(this.drawTableList, 10000);
-        this.interAccuracy = window.setInterval(this.drawPointGraph, 10000);
-        this.checkExperimentPlatform();
+    updateSearchFilterType = (value: string): void => {
+        // clear input value and re-render table
+        if (this.searchInput !== null) {
+            this.searchInput.value = '';
+        }
+        this.setState({ searchType: value });
     }
 
-    componentWillUnmount() {
-        this._isMounted = false;
-        window.clearInterval(this.interTableList);
-        window.clearInterval(this.interAccuracy);
-    }
-
-    render() {
-        const { accSource, accNodata, tableListSource, 
-            entriesTable, searchResultSource, isHasSearch,
-            experimentPlatform
-        } = this.state;
-        const titleOfacc = (
-            <Title1 text="Default Metric" icon="3.png" />
-        );
-        const titleOfhyper = (
-            <Title1 text="Hyper Parameter" icon="1.png" />
-        );
-        const titleOfDuration = (
-            <Title1 text="Trial Duration" icon="2.png" />
-        );
+    render(): React.ReactNode {
+        const { tablePageSize, whichGraph } = this.state;
+        const { columnList, changeColumn } = this.props;
+        const source = TRIALS.filter(this.state.searchFilter);
+        const trialIds = TRIALS.filter(this.state.searchFilter).map(trial => trial.id);
         return (
             <div>
                 <div className="trial" id="tabsty">
-                    <Tabs onChange={this.callback} type="card">
-                        <TabPane tab={titleOfacc} key="1">
+                    <Tabs type="card" onChange={this.handleWhichTabs}>
+                        <TabPane tab={this.titleOfacc} key="1">
                             <Row className="graph">
-                                <Accuracy
-                                    height={432}
-                                    accuracyData={accSource}
-                                    accNodata={accNodata}
+                                <DefaultPoint
+                                    trialIds={trialIds}
+                                    visible={whichGraph === '1'}
+                                    trialsUpdateBroadcast={this.props.trialsUpdateBroadcast}
                                 />
                             </Row>
                         </TabPane>
-                        <TabPane tab={titleOfhyper} key="2">
-                            <Row className="graph"><Para /></Row>
+                        <TabPane tab={this.titleOfhyper} key="2">
+                            <Row className="graph">
+                                <Para
+                                    dataSource={source}
+                                    expSearchSpace={JSON.stringify(EXPERIMENT.searchSpace)}
+                                    whichGraph={whichGraph}
+                                />
+                            </Row>
                         </TabPane>
-                        <TabPane tab={titleOfDuration} key="3">
-                            <Duration />
+                        <TabPane tab={this.titleOfDuration} key="3">
+                            <Duration source={source} whichGraph={whichGraph} />
+                        </TabPane>
+                        <TabPane tab={this.titleOfIntermediate} key="4">
+                            <Intermediate source={source} whichGraph={whichGraph} />
                         </TabPane>
                     </Tabs>
                 </div>
                 {/* trial table list */}
-                <Title1 text="All Trials" icon="6.png" />
+                <Title1 text="Trial jobs" icon="6.png" />
                 <Row className="allList">
-                    <Col span={12}>
-                        <span>show</span>
+                    <Col span={10}>
+                        <span>Show</span>
                         <Select
                             className="entry"
-                            onSelect={this.handleEntriesSelect}
+                            onSelect={this.handleTablePageSizeSelect}
                             defaultValue="20"
                         >
                             <Option value="20">20</Option>
@@ -460,37 +162,44 @@ class TrialsDetail extends React.Component<{}, TrialDetailState> {
                         </Select>
                         <span>entries</span>
                     </Col>
-                    <Col span={12} className="right">
-                        <Row>
-                            <Col span={12}>
-                                <Button
-                                    type="primary"
-                                    className="tableButton editStyle"
-                                    onClick={this.tableList ? this.tableList.addColumn : this.test}
-                                >
-                                    AddColumn
-                                </Button>
-                            </Col>
-                            <Col span={12}>
-                                {/* <span>Search:</span> */}
-                                <Input
-                                    type="text"
-                                    placeholder="search by Trial No. and id"
-                                    onChange={this.searchTrial}
-                                    style={{ width: 200, marginLeft: 6 }}
-                                />
-                            </Col>
-                        </Row>
+                    <Col span={14} className="right">
+                        <Button
+                            className="common"
+                            onClick={(): void => { if (this.tableList) { this.tableList.addColumn(); }}}
+                        >
+                            Add column
+                        </Button>
+                        <Button
+                            className="mediateBtn common"
+                            // use child-component tableList's function, the function is in child-component.
+                            onClick={(): void => { if (this.tableList) { this.tableList.compareBtn(); }}}
+                        >
+                            Compare
+                        </Button>
+                        <Select defaultValue="id" className="filter" onSelect={this.updateSearchFilterType}>
+                            <Option value="id">Id</Option>
+                            <Option value="Trial No.">Trial No.</Option>
+                            <Option value="status">Status</Option>
+                            <Option value="parameters">Parameters</Option>
+                        </Select>
+                        <input
+                            type="text"
+                            className="search-input"
+                            placeholder={`Search by ${this.state.searchType}`}
+                            onChange={this.searchTrial}
+                            style={{ width: 230 }}
+                            // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
+                            ref={text => (this.searchInput) = text}
+                        />
                     </Col>
                 </Row>
                 <TableList
-                    entries={entriesTable}
-                    tableSource={tableListSource}
-                    updateList={this.drawTableList}
-                    searchResult={searchResultSource}
-                    isHasSearch={isHasSearch}
-                    platform={experimentPlatform}
-                    ref={(tabList) => this.tableList = tabList}
+                    pageSize={tablePageSize}
+                    tableSource={source.map(trial => trial.tableRecord)}
+                    columnList={columnList}
+                    changeColumn={changeColumn}
+                    trialsUpdateBroadcast={this.props.trialsUpdateBroadcast}
+                    ref={(tabList) => this.tableList = tabList} // eslint-disable-line @typescript-eslint/explicit-function-return-type
                 />
             </div>
         );

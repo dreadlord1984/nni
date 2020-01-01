@@ -1,10 +1,11 @@
 import * as React from 'react';
-import { Experiment } from '../../static/interface';
 import MonacoEditor from 'react-monaco-editor';
 import { MONACO } from '../../static/const';
+import { EXPERIMENT } from '../../static/datamodel';
 
 interface TrialInfoProps {
-    tiralProInfo: Experiment;
+    experimentUpdateBroadcast: number;
+    concurrency: number;
 }
 
 class TrialInfo extends React.Component<TrialInfoProps, {}> {
@@ -13,26 +14,28 @@ class TrialInfo extends React.Component<TrialInfoProps, {}> {
         super(props);
     }
 
-    render() {
-        const { tiralProInfo } = this.props;
-        const showProInfo = [];
-        showProInfo.push({
-            revision: tiralProInfo.revision,
-            authorName: tiralProInfo.author,
-            trialConcurrency: tiralProInfo.runConcurren,
-            tuner: tiralProInfo.tuner,
-            assessor: tiralProInfo.assessor ? tiralProInfo.assessor : undefined,
-            advisor: tiralProInfo.advisor ? tiralProInfo.advisor : undefined,
-            clusterMetaData: tiralProInfo.clusterMetaData ? tiralProInfo.clusterMetaData : undefined
-        });
+    render(): React.ReactNode {
+        const blacklist = [
+            'id', 'logDir', 'startTime', 'endTime',
+            'experimentName', 'searchSpace', 'trainingServicePlatform'
+        ];
+        const filter = (key: string, val: any): any => {
+            if (key === 'trialConcurrency') {
+                return this.props.concurrency;
+            }
+            return blacklist.includes(key) ? undefined : val;
+        };
+        const profile = JSON.stringify(EXPERIMENT.profile, filter, 2);
+
+        // FIXME: highlight not working?
         return (
             <div className="profile">
                 <MonacoEditor
                     width="100%"
-                    height="380"
+                    height="361"
                     language="json"
                     theme="vs-light"
-                    value={JSON.stringify(showProInfo[0], null, 2)}
+                    value={profile}
                     options={MONACO}
                 />
             </div>

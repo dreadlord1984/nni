@@ -1,3 +1,6 @@
+all:
+  logCollection: http
+
 kubeflow:
   maxExecDuration: 15m
   nniManagerIp:
@@ -26,11 +29,11 @@ local:
 pai:
   nniManagerIp:
   maxExecDuration: 15m
-  paiConfig:
+  paiYarnConfig:
     host:
     passWord:
     userName:
-  trainingServicePlatform: pai
+  trainingServicePlatform: paiYarn
   trial:
     gpuNum: 1
     cpuNum: 1
@@ -38,6 +41,7 @@ pai:
     image:
     memoryMB: 8192
     outputDir:
+    virtualCluster:
 remote:
   machineList:
   - ip:

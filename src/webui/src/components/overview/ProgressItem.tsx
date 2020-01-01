@@ -16,22 +16,22 @@ class ProgressBar extends React.Component<ProItemProps, {}> {
 
     }
 
-    render() {
+    render(): React.ReactNode {
         const { who, percent, description, maxString, bgclass } = this.props;
 
         return (
             <div>
                 <Row className={`probar ${bgclass}`}>
-                        <Col span={6}>
+                        <Col span={8}>
                             <div className="name">{who}</div>
                         </Col>
-                        <Col span={17} className="bar">
+                        <Col span={16} className="bar">
                             <div className="showProgress">
                                 <Progress
                                     percent={percent}
                                     strokeWidth={30}
                                     // strokeLinecap={'square'}
-                                    format={() => description}
+                                    format={(): string => description}
                                 />
                             </div>
                             <Row className="description">

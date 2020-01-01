@@ -12,7 +12,7 @@ class LogPath extends React.Component<LogpathProps, {}> {
 
     }
 
-    render() {
+    render(): React.ReactNode {
         const { logStr } = this.props;
         const isTwopath = logStr.indexOf(',') !== -1
             ?
@@ -31,13 +31,13 @@ class LogPath extends React.Component<LogpathProps, {}> {
                             />
                             <LogPathChild
                                 eachLogpath={logStr.split(',')[1]}
-                                logName="hdfsLogPath:"
+                                logName="Log on HDFS:"
                             />
                         </div>
                         :
                         <LogPathChild
                             eachLogpath={logStr}
-                            logName="LogPath:"
+                            logName="Log path:"
                         />
                 }
             </div>

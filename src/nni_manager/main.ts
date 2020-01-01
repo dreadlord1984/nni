@@ -1,77 +1,87 @@
-/**
- * Copyright (c) Microsoft Corporation
- * All rights reserved.
- *
- * MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
- * documentation files (the "Software"), to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
- * to permit persons to whom the Software is furnished to do so, subject to the following conditions:
- * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
- * BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
- * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- */
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
 
 'use strict';
 
 import { Container, Scope } from 'typescript-ioc';
 
-import * as component from './common/component';
 import * as fs from 'fs';
+import * as component from './common/component';
 import { Database, DataStore } from './common/datastore';
 import { setExperimentStartupInfo } from './common/experimentStartupInfo';
 import { getLogger, Logger, logLevelNameMap } from './common/log';
-import { Manager } from './common/manager';
+import { Manager, ExperimentStartUpMode } from './common/manager';
 import { TrainingService } from './common/trainingService';
-import { parseArg, uniqueString, mkDirP, getLogDir } from './common/utils';
+import { getLogDir, mkDirP, parseArg, uniqueString } from './common/utils';
 import { NNIDataStore } from './core/nniDataStore';
 import { NNIManager } from './core/nnimanager';
 import { SqlDB } from './core/sqlDatabase';
 import { NNIRestServer } from './rest_server/nniRestServer';
-import { LocalTrainingServiceForGPU } from './training_service/local/localTrainingServiceForGPU';
+import { FrameworkControllerTrainingService } from './training_service/kubernetes/frameworkcontroller/frameworkcontrollerTrainingService';
+import { KubeflowTrainingService } from './training_service/kubernetes/kubeflow/kubeflowTrainingService';
+import { LocalTrainingService } from './training_service/local/localTrainingService';
+import { PAIK8STrainingService } from './training_service/pai/paiK8S/paiK8STrainingService';
+import { PAIYarnTrainingService } from './training_service/pai/paiYarn/paiYarnTrainingService';
 import {
     RemoteMachineTrainingService
 } from './training_service/remote_machine/remoteMachineTrainingService';
-import { PAITrainingService } from './training_service/pai/paiTrainingService';
-import { KubeflowTrainingService } from './training_service/kubernetes/kubeflow/kubeflowTrainingService';
-import { FrameworkControllerTrainingService } from './training_service/kubernetes/frameworkcontroller/frameworkcontrollerTrainingService';
 
-function initStartupInfo(startExpMode: string, resumeExperimentId: string, basePort: number, logDirectory: string, experimentLogLevel: string) {
-    const createNew: boolean = (startExpMode === 'new');
+function initStartupInfo(
+    startExpMode: string, resumeExperimentId: string, basePort: number,
+    logDirectory: string, experimentLogLevel: string, readonly: boolean): void {
+    const createNew: boolean = (startExpMode === ExperimentStartUpMode.NEW);
     const expId: string = createNew ? uniqueString(8) : resumeExperimentId;
-    setExperimentStartupInfo(createNew, expId, basePort, logDirectory, experimentLogLevel);
+    setExperimentStartupInfo(createNew, expId, basePort, logDirectory, experimentLogLevel, readonly);
 }
 
-async function initContainer(platformMode: string): Promise<void> {
+async function initContainer(platformMode: string, logFileName?: string): Promise<void> {
     if (platformMode === 'local') {
-        Container.bind(TrainingService).to(LocalTrainingServiceForGPU).scope(Scope.Singleton);
+        Container.bind(TrainingService)
+            .to(LocalTrainingService)
+            .scope(Scope.Singleton);
     } else if (platformMode === 'remote') {
-        Container.bind(TrainingService).to(RemoteMachineTrainingService).scope(Scope.Singleton);
+        Container.bind(TrainingService)
+            .to(RemoteMachineTrainingService)
+            .scope(Scope.Singleton);
     } else if (platformMode === 'pai') {
-        Container.bind(TrainingService).to(PAITrainingService).scope(Scope.Singleton);
+        Container.bind(TrainingService)
+            .to(PAIK8STrainingService)
+            .scope(Scope.Singleton);
+    } else if (platformMode === 'paiYarn') {
+            Container.bind(TrainingService)
+            .to(PAIYarnTrainingService)
+            .scope(Scope.Singleton);
     } else if (platformMode === 'kubeflow') {
-        Container.bind(TrainingService).to(KubeflowTrainingService).scope(Scope.Singleton);
+        Container.bind(TrainingService)
+            .to(KubeflowTrainingService)
+            .scope(Scope.Singleton);
     } else if (platformMode === 'frameworkcontroller') {
-        Container.bind(TrainingService).to(FrameworkControllerTrainingService).scope(Scope.Singleton);
+        Container.bind(TrainingService)
+            .to(FrameworkControllerTrainingService)
+            .scope(Scope.Singleton);
+    } else {
+        throw new Error(`Error: unsupported mode: ${platformMode}`);
     }
-    else {
-        throw new Error(`Error: unsupported mode: ${mode}`);
-    }
-    Container.bind(Manager).to(NNIManager).scope(Scope.Singleton);
-    Container.bind(Database).to(SqlDB).scope(Scope.Singleton);
-    Container.bind(DataStore).to(NNIDataStore).scope(Scope.Singleton);
+    Container.bind(Manager)
+        .to(NNIManager)
+        .scope(Scope.Singleton);
+    Container.bind(Database)
+        .to(SqlDB)
+        .scope(Scope.Singleton);
+    Container.bind(DataStore)
+        .to(NNIDataStore)
+        .scope(Scope.Singleton);
+    Container.bind(Logger).provider({
+        get: (): Logger => new Logger(logFileName)
+    });
     const ds: DataStore = component.get(DataStore);
 
     await ds.init();
 }
 
 function usage(): void {
-    console.info('usage: node main.js --port <port> --mode <local/remote/pai/kubeflow/frameworkcontroller> --start_mode <new/resume> --experiment_id <id>');
+    console.info('usage: node main.js --port <port> --mode \
+    <local/remote/pai/kubeflow/frameworkcontroller/paiYarn> --start_mode <new/resume> --experiment_id <id>');
 }
 
 const strPort: string = parseArg(['--port', '-p']);
@@ -83,22 +93,22 @@ if (!strPort || strPort.length === 0) {
 const port: number = parseInt(strPort, 10);
 
 const mode: string = parseArg(['--mode', '-m']);
-if (!['local', 'remote', 'pai', 'kubeflow', 'frameworkcontroller'].includes(mode)) {
+if (!['local', 'remote', 'pai', 'kubeflow', 'frameworkcontroller', 'paiYarn'].includes(mode)) {
     console.log(`FATAL: unknown mode: ${mode}`);
     usage();
     process.exit(1);
 }
 
 const startMode: string = parseArg(['--start_mode', '-s']);
-if (!['new', 'resume'].includes(startMode)) {
+if (![ExperimentStartUpMode.NEW, ExperimentStartUpMode.RESUME].includes(startMode)) {
     console.log(`FATAL: unknown start_mode: ${startMode}`);
     usage();
     process.exit(1);
 }
 
 const experimentId: string = parseArg(['--experiment_id', '-id']);
-if (startMode === 'resume' && experimentId.trim().length < 1) {
-    console.log(`FATAL: cannot resume experiment, invalid experiment_id: ${experimentId}`);
+if ((startMode === ExperimentStartUpMode.RESUME) && experimentId.trim().length < 1) {
+    console.log(`FATAL: cannot resume the experiment, invalid experiment_id: ${experimentId}`);
     usage();
     process.exit(1);
 }
@@ -115,38 +125,58 @@ if (logLevel.length > 0 && !logLevelNameMap.has(logLevel)) {
     console.log(`FATAL: invalid log_level: ${logLevel}`);
 }
 
-initStartupInfo(startMode, experimentId, port, logDir, logLevel);
+const readonlyArg: string = parseArg(['--readonly', '-r']);
+if (!('true' || 'false').includes(readonlyArg.toLowerCase())) {
+    console.log(`FATAL: readonly property should only be true or false`);
+    usage();
+    process.exit(1);
+}
+const readonly = readonlyArg.toLowerCase() == 'true' ? true : false;
 
-mkDirP(getLogDir()).then(async () => {
-    const log: Logger = getLogger();
+initStartupInfo(startMode, experimentId, port, logDir, logLevel, readonly);
+
+mkDirP(getLogDir())
+    .then(async () => {
     try {
         await initContainer(mode);
         const restServer: NNIRestServer = component.get(NNIRestServer);
         await restServer.start();
+        const log: Logger = getLogger();
         log.info(`Rest server listening on: ${restServer.endPoint}`);
     } catch (err) {
+        const log: Logger = getLogger();
         log.error(`${err.stack}`);
         throw err;
     }
-}).catch((err: Error) => {
+})
+.catch((err: Error) => {
     console.error(`Failed to create log dir: ${err.stack}`);
 });
 
-process.on('SIGTERM', async () => {
+function getStopSignal(): any {
+    if (process.platform === "win32") {
+        return 'SIGBREAK';
+    }
+    else{
+        return 'SIGTERM';
+    }
+}
+
+process.on(getStopSignal(), async () => {
     const log: Logger = getLogger();
     let hasError: boolean = false;
-    try{
+    try {
         const nniManager: Manager = component.get(Manager);
         await nniManager.stopExperiment();
         const ds: DataStore = component.get(DataStore);
         await ds.close();
         const restServer: NNIRestServer = component.get(NNIRestServer);
         await restServer.stop();
-    }catch(err){
+    } catch (err) {
         hasError = true;
         log.error(`${err.stack}`);
-    }finally{
+    } finally {
         await log.close();
-        process.exit(hasError?1:0);
+        process.exit(hasError ? 1 : 0);
     }
-})
+});

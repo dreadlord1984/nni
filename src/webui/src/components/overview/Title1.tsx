@@ -2,7 +2,7 @@ import * as React from 'react';
 
 interface Title1Props {
     text: string;
-    icon: string;
+    icon?: string;
     bgcolor?: string;
 }
 
@@ -12,7 +12,7 @@ class Title1 extends React.Component<Title1Props, {}> {
         super(props);
     }
 
-    render() {
+    render(): React.ReactNode {
         const { text, icon, bgcolor } = this.props;
         return (
             <div>

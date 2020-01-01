@@ -1,11 +1,12 @@
 import axios from 'axios';
-import {
-    message
-} from 'antd';
+import { message } from 'antd';
 import { MANAGER_IP } from './const';
-import { FinalResult, FinalType } from './interface';
+import { MetricDataRecord, FinalType, TableObj } from './interface';
 
-const convertTime = (num: number) => {
+const convertTime = (num: number): string => {
+    if (num <= 0) {
+        return '0';
+    }
     if (num % 3600 === 0) {
         return num / 3600 + 'h';
     } else {
@@ -16,29 +17,33 @@ const convertTime = (num: number) => {
 };
 
 // trial's duration, accurate to seconds for example 10min 30s
-const convertDuration = (num: number) => {
-    const hour = Math.floor(num / 3600);
-    const min = Math.floor(num / 60 % 60);
-    const second = Math.floor(num % 60);
-    const result = hour > 0 ? `${hour} h ${min} min ${second}s` : `${min} min ${second}s`;
-    if (hour <= 0 && min === 0 && second !== 0) {
-        return `${second}s`;
-    } else if (hour === 0 && min !== 0 && second === 0) {
-        return `${min}min`;
-    } else if (hour === 0 && min !== 0 && second !== 0) {
-        return `${min}min ${second}s`;
-    } else {
-        return result;
+const convertDuration = (num: number): string => {
+    if (num < 1) {
+        return '0s';
     }
+    const hour = Math.floor(num / 3600);
+    const minute = Math.floor(num / 60 % 60);
+    const second = Math.floor(num % 60);
+    const result = [ ];
+    if (hour > 0) {
+        result.push(`${hour}h`);
+    }
+    if (minute > 0) {
+        result.push(`${minute}min`);
+    }
+    if (second > 0) {
+        result.push(`${second}s`);
+    }
+    return result.join(' ');
 };
 
 // get final result value
 // draw Accuracy point graph
-const getFinalResult = (final: FinalResult) => {
+const getFinalResult = (final?: MetricDataRecord[]): number => {
     let acc;
     let showDefault = 0;
     if (final) {
-        acc = JSON.parse(final[0].data);
+        acc = JSON.parse(final[final.length - 1].data);
         if (typeof (acc) === 'object') {
             if (acc.default) {
                 showDefault = acc.default;
@@ -52,11 +57,11 @@ const getFinalResult = (final: FinalResult) => {
     }
 };
 
-// get final result value // acc obj 
-const getFinal = (final: FinalResult) => {
+// get final result value // acc obj
+const getFinal = (final?: MetricDataRecord[]): any => {
     let showDefault: FinalType;
     if (final) {
-        showDefault = JSON.parse(final[0].data);
+        showDefault = JSON.parse(final[final.length - 1].data);
         if (typeof showDefault === 'number') {
             showDefault = { default: showDefault };
         }
@@ -67,7 +72,7 @@ const getFinal = (final: FinalResult) => {
 };
 
 // detail page table intermediate button
-const intermediateGraphOption = (intermediateArr: number[], id: string) => {
+const intermediateGraphOption = (intermediateArr: number[], id: string): any => {
     const sequence: number[] = [];
     const lengthInter = intermediateArr.length;
     for (let i = 1; i <= lengthInter; i++) {
@@ -90,7 +95,7 @@ const intermediateGraphOption = (intermediateArr: number[], id: string) => {
             data: sequence
         },
         yAxis: {
-            name: 'Default Metric',
+            name: 'Default metric',
             type: 'value',
             data: intermediateArr
         },
@@ -103,7 +108,7 @@ const intermediateGraphOption = (intermediateArr: number[], id: string) => {
 };
 
 // kill job
-const killJob = (key: number, id: string, status: string, updateList: Function) => {
+const killJob = (key: number, id: string, status: string, updateList?: Function): void => {
     axios(`${MANAGER_IP}/trial-jobs/${id}`, {
         method: 'DELETE',
         headers: {
@@ -112,9 +117,12 @@ const killJob = (key: number, id: string, status: string, updateList: Function) 
     })
         .then(res => {
             if (res.status === 200) {
+                message.destroy();
                 message.success('Cancel the job successfully');
                 // render the table
-                updateList();
+                if (updateList) {
+                    updateList();  // FIXME
+                }
             } else {
                 message.error('fail to cancel the job');
             }
@@ -130,7 +138,53 @@ const killJob = (key: number, id: string, status: string, updateList: Function) 
         });
 };
 
+const filterByStatus = (item: TableObj): any => {
+    return item.status === 'SUCCEEDED';
+};
+
+// a waittiong trial may havn't start time 
+const filterDuration = (item: TableObj): any => {
+    return item.status !== 'WAITING';
+};
+
+const downFile = (content: string, fileName: string): void => {
+    const aTag = document.createElement('a');
+    const isEdge = navigator.userAgent.indexOf('Edge') !== -1 ? true : false;
+    const file = new Blob([content], { type: 'application/json' });
+    aTag.download = fileName;
+    aTag.href = URL.createObjectURL(file);
+    aTag.click();
+    if (!isEdge) {
+        URL.revokeObjectURL(aTag.href);
+    }
+    if (navigator.userAgent.indexOf('Firefox') > -1) {
+        const downTag = document.createElement('a');
+        downTag.addEventListener('click', function () {
+            downTag.download = fileName;
+            downTag.href = URL.createObjectURL(file);
+        });
+        const eventMouse = document.createEvent('MouseEvents');
+        eventMouse.initEvent('click', false, false);
+        downTag.dispatchEvent(eventMouse);
+    }
+};
+
+function formatTimestamp(timestamp?: number, placeholder?: string = 'N/A'): string {
+    return timestamp ? new Date(timestamp).toLocaleString('en-US') : placeholder;
+}
+
+function metricAccuracy(metric: MetricDataRecord): number {
+    const data = JSON.parse(metric.data);
+    return typeof data === 'number' ? data : NaN;
+}
+
+function formatAccuracy(accuracy: number): string {
+    // TODO: how to format NaN?
+    return accuracy.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+}
+
 export {
-    convertTime, convertDuration, getFinalResult,
-    getFinal, intermediateGraphOption, killJob
+    convertTime, convertDuration, getFinalResult, getFinal, downFile,
+    intermediateGraphOption, killJob, filterByStatus, filterDuration,
+    formatAccuracy, formatTimestamp, metricAccuracy
 };

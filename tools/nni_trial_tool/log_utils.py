@@ -1,22 +1,5 @@
-# Copyright (c) Microsoft Corporation
-# All rights reserved.
-#
-# MIT License
-#
-# Permission is hereby granted, free of charge,
-# to any person obtaining a copy of this software and associated
-# documentation files (the "Software"), to deal in the Software without restriction,
-# including without limitation the rights to use, copy, modify, merge, publish,
-# distribute, sublicense, and/or sell copies of the Software, and
-# to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
-# BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT license.
 
 import os
 import sys
@@ -25,6 +8,7 @@ import logging
 import logging.handlers
 import time
 import threading
+import re
 
 from datetime import datetime
 from enum import Enum, unique
@@ -32,8 +16,7 @@ from logging import StreamHandler
 
 from queue import Queue
 
-from .rest_utils import rest_get, rest_post, rest_put, rest_delete
-from .constants import NNI_EXP_ID, NNI_TRIAL_JOB_ID, STDOUT_API
+from .rest_utils import rest_post
 from .url_utils import gen_send_stdout_url
 
 @unique
@@ -72,7 +55,7 @@ class NNIRestLogHanlder(StreamHandler):
         log_entry['msg'] = self.format(record)
 
         try:
-            response = rest_post(gen_send_stdout_url(self.host, self.port), json.dumps(log_entry), 10, True)
+            rest_post(gen_send_stdout_url(self.host, self.port), json.dumps(log_entry), 10, True)
         except Exception as e:
             self.orig_stderr.write(str(e) + '\n')
             self.orig_stderr.flush()
@@ -81,7 +64,7 @@ class RemoteLogger(object):
     """
     NNI remote logger
     """
-    def __init__(self, syslog_host, syslog_port, tag, std_output_type, log_level=logging.INFO):
+    def __init__(self, syslog_host, syslog_port, tag, std_output_type, log_collection, log_level=logging.INFO):
         '''
         constructor
         '''
@@ -94,12 +77,13 @@ class RemoteLogger(object):
             self.orig_stdout = sys.__stdout__
         else:
             self.orig_stdout = sys.__stderr__
+        self.log_collection = log_collection
 
     def get_pipelog_reader(self):
         '''
         Get pipe for remote logger
         '''
-        return PipeLogReader(self.logger, logging.INFO)
+        return PipeLogReader(self.logger, self.log_collection, logging.INFO)
 
     def write(self, buf):
         '''
@@ -110,14 +94,14 @@ class RemoteLogger(object):
             self.orig_stdout.flush()
             try:
                 self.logger.log(self.log_level, line.rstrip())
-            except Exception as e:
+            except Exception:
                 pass
 
 class PipeLogReader(threading.Thread):
     """
     The reader thread reads log data from pipe
     """
-    def __init__(self, logger, log_level=logging.INFO):
+    def __init__(self, logger, log_collection, log_level=logging.INFO):
         """Setup the object with a logger and a loglevel
         and start the thread
         """
@@ -131,6 +115,8 @@ class PipeLogReader(threading.Thread):
         self.orig_stdout = sys.__stdout__
         self._is_read_completed = False
         self.process_exit = False
+        self.log_collection = log_collection
+        self.log_pattern = re.compile(r'NNISDK_MEb\'.*\'$')
 
         def _populateQueue(stream, queue):
             '''
@@ -138,22 +124,19 @@ class PipeLogReader(threading.Thread):
             '''
             time.sleep(5)
             while True:
-                cur_process_exit = self.process_exit       
+                cur_process_exit = self.process_exit
                 try:
                     line = self.queue.get(True, 5)
                     try:
                         self.logger.log(self.log_level, line.rstrip())
-                        self.orig_stdout.write(line.rstrip() + '\n')
-                        self.orig_stdout.flush()
-                    except Exception as e:
+                    except Exception:
                         pass
-                except Exception as e:
-                    if cur_process_exit == True:     
+                except Exception:
+                    if cur_process_exit == True:
                         self._is_read_completed = True
                         break
 
-        self.pip_log_reader_thread = threading.Thread(target = _populateQueue,
-                args = (self.pipeReader, self.queue))
+        self.pip_log_reader_thread = threading.Thread(target=_populateQueue, args=(self.pipeReader, self.queue))
         self.pip_log_reader_thread.daemon = True
         self.start()
         self.pip_log_reader_thread.start()
@@ -165,9 +148,20 @@ class PipeLogReader(threading.Thread):
 
     def run(self):
         """Run the thread, logging everything.
+           If the log_collection is 'none', the log content will not be enqueued
         """
         for line in iter(self.pipeReader.readline, ''):
-            self.queue.put(line)
+            self.orig_stdout.write(line.rstrip() + '\n')
+            self.orig_stdout.flush()
+
+            if self.log_collection == 'none':
+                search_result = self.log_pattern.search(line)
+                if search_result:
+                    metrics = search_result.group(0)
+                    self.queue.put(metrics+'\n')
+            else:
+                self.queue.put(line)
+
         self.pipeReader.close()
 
     def close(self):
@@ -180,7 +174,7 @@ class PipeLogReader(threading.Thread):
         """Return if read is completed
         """
         return self._is_read_completed
-    
+
     def set_process_exit(self):
         self.process_exit = True
         return self.process_exit

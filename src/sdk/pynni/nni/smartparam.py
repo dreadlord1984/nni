@@ -1,30 +1,12 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
-#
-# MIT License
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
-# associated documentation files (the "Software"), to deal in the Software without restriction,
-# including without limitation the rights to use, copy, modify, merge, publish, distribute,
-# sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all copies or
-# substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
-# NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
-# OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-# ==================================================================================================
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT license.
 
+import numpy as np
 
-import inspect
-import math
-import random
-
-from .common import env_args
+from .env_vars import trial_env_vars
 from . import trial
+from . import parameter_expressions as param_exp
+from .nas_utils import classic_mode, enas_mode, oneshot_mode, darts_mode
 
 
 __all__ = [
@@ -38,96 +20,129 @@ __all__ = [
     'qnormal',
     'lognormal',
     'qlognormal',
-    'function_choice'
+    'function_choice',
+    'mutable_layer'
 ]
 
 
-# pylint: disable=unused-argument
-
-if env_args.platform is None:
+if trial_env_vars.NNI_PLATFORM is None:
     def choice(*options, name=None):
-        return random.choice(options)
+        return param_exp.choice(options, np.random.RandomState())
 
-    def randint(upper, name=None):
-        return random.randrange(upper)
+    def randint(lower, upper, name=None):
+        return param_exp.randint(lower, upper, np.random.RandomState())
 
     def uniform(low, high, name=None):
-        return random.uniform(low, high)
+        return param_exp.uniform(low, high, np.random.RandomState())
 
     def quniform(low, high, q, name=None):
         assert high > low, 'Upper bound must be larger than lower bound'
-        return round(random.uniform(low, high) / q) * q
+        return param_exp.quniform(low, high, q, np.random.RandomState())
 
     def loguniform(low, high, name=None):
         assert low > 0, 'Lower bound must be positive'
-        return np.exp(random.uniform(np.log(low), np.log(high)))
+        return param_exp.loguniform(low, high, np.random.RandomState())
 
     def qloguniform(low, high, q, name=None):
-        return round(loguniform(low, high) / q) * q
+        return param_exp.qloguniform(low, high, q, np.random.RandomState())
 
     def normal(mu, sigma, name=None):
-        return random.gauss(mu, sigma)
+        return param_exp.normal(mu, sigma, np.random.RandomState())
 
     def qnormal(mu, sigma, q, name=None):
-        return round(random.gauss(mu, sigma) / q) * q
+        return param_exp.qnormal(mu, sigma, q, np.random.RandomState())
 
     def lognormal(mu, sigma, name=None):
-        return np.exp(random.gauss(mu, sigma))
+        return param_exp.lognormal(mu, sigma, np.random.RandomState())
 
     def qlognormal(mu, sigma, q, name=None):
-        return round(lognormal(mu, sigma) / q) * q
+        return param_exp.qlognormal(mu, sigma, q, np.random.RandomState())
 
     def function_choice(*funcs, name=None):
-        return random.choice(funcs)()
+        return param_exp.choice(funcs, np.random.RandomState())()
+
+    def mutable_layer():
+        raise RuntimeError('Cannot call nni.mutable_layer in this mode')
 
 else:
 
-    def choice(options, name=None):
-        return options[_get_param('choice', name)]
+    def choice(options, name=None, key=None):
+        return options[_get_param(key)]
 
-    def randint(upper, name=None):
-        return _get_param('randint', name)
+    def randint(lower, upper, name=None, key=None):
+        return _get_param(key)
 
-    def uniform(low, high, name=None):
-        return _get_param('uniform', name)
+    def uniform(low, high, name=None, key=None):
+        return _get_param(key)
 
-    def quniform(low, high, q, name=None):
-        return _get_param('quniform', name)
+    def quniform(low, high, q, name=None, key=None):
+        return _get_param(key)
 
-    def loguniform(low, high, name=None):
-        return _get_param('loguniform', name)
+    def loguniform(low, high, name=None, key=None):
+        return _get_param(key)
 
-    def qloguniform(low, high, q, name=None):
-        return _get_param('qloguniform', name)
+    def qloguniform(low, high, q, name=None, key=None):
+        return _get_param(key)
 
-    def normal(mu, sigma, name=None):
-        return _get_param('normal', name)
+    def normal(mu, sigma, name=None, key=None):
+        return _get_param(key)
 
-    def qnormal(mu, sigma, q, name=None):
-        return _get_param('qnormal', name)
+    def qnormal(mu, sigma, q, name=None, key=None):
+        return _get_param(key)
 
-    def lognormal(mu, sigma, name=None):
-        return _get_param('lognormal', name)
+    def lognormal(mu, sigma, name=None, key=None):
+        return _get_param(key)
 
-    def qlognormal(mu, sigma, q, name=None):
-        return _get_param('qlognormal', name)
+    def qlognormal(mu, sigma, q, name=None, key=None):
+        return _get_param(key)
 
-    def function_choice(funcs, name=None):
-        return funcs[_get_param('function_choice', name)]()
+    def function_choice(funcs, name=None, key=None):
+        return funcs[_get_param(key)]()
 
-    def _get_param(func, name):
-        # frames:
-        #   layer 0: this function
-        #   layer 1: the API function (caller of this function)
-        #   layer 2: caller of the API function
-        frame = inspect.stack(0)[2]
-        filename = frame.filename
-        lineno = frame.lineno  # NOTE: this is the lineno of caller's last argument
-        del frame  # see official doc
-        module = inspect.getmodulename(filename)
-        if name is None:
-            name = '__line{:d}'.format(lineno)
-        key = '{}/{}/{}'.format(module, name, func)
-        if trial._params is None:
+    def mutable_layer(
+            mutable_id,
+            mutable_layer_id,
+            funcs,
+            funcs_args,
+            fixed_inputs,
+            optional_inputs,
+            optional_input_size,
+            mode='classic_mode',
+            tf=None):
+        '''execute the chosen function and inputs.
+        Below is an example of chosen function and inputs:
+        {
+            "mutable_id": {
+                "mutable_layer_id": {
+                    "chosen_layer": "pool",
+                    "chosen_inputs": ["out1", "out3"]
+                }
+            }
+        }
+        Parameters:
+        ---------------
+        mutable_id: the name of this mutable_layer block (which could have multiple mutable layers)
+        mutable_layer_id: the name of a mutable layer in this block
+        funcs: dict of function calls
+        funcs_args:
+        fixed_inputs:
+        optional_inputs: dict of optional inputs
+        optional_input_size: number of candidate inputs to be chosen
+        tf: tensorflow module
+        '''
+        args = (mutable_id, mutable_layer_id, funcs, funcs_args, fixed_inputs, optional_inputs, optional_input_size)
+        if mode == 'classic_mode':
+            return classic_mode(*args)
+        assert tf is not None, 'Internal Error: Tensorflow should not be None in modes other than classic_mode'
+        if mode == 'enas_mode':
+            return enas_mode(*args, tf)
+        if mode == 'oneshot_mode':
+            return oneshot_mode(*args, tf)
+        if mode == 'darts_mode':
+            return darts_mode(*args, tf)
+        raise RuntimeError('Unrecognized mode: %s' % mode)
+
+    def _get_param(key):
+        if trial.get_current_parameter() is None:
             trial.get_next_parameter()
         return trial.get_current_parameter(key)

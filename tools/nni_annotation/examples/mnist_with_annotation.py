@@ -1,28 +1,16 @@
 #!/usr/bin/python
-# Copyright (c) Microsoft Corporation
-# All rights reserved.
-#
-# MIT License
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
-# documentation files (the "Software"), to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
-# to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-# The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
-# BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT license.
 
 """A deep MNIST classifier using convolutional layers."""
 
 import logging
 import math
 import tempfile
-import tensorflow as tf
+import time
 
+import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
 
 FLAGS = None
@@ -168,13 +156,21 @@ def bias_variable(shape):
     initial = tf.constant(0.1, shape=shape)
     return tf.Variable(initial)
 
+def download_mnist_retry(data_dir, max_num_retries=20):
+    """Try to download mnist dataset and avoid errors"""
+    for _ in range(max_num_retries):
+        try:
+            return input_data.read_data_sets(data_dir, one_hot=True)
+        except tf.errors.AlreadyExistsError:
+            time.sleep(1)
+    raise Exception("Failed to download MNIST.")
 
 def main(params):
     '''
     Main function, build mnist network, run and send result to NNI.
     '''
     # Import data
-    mnist = input_data.read_data_sets(params['data_dir'], one_hot=True)
+    mnist = download_mnist_retry(params['data_dir'])
     print('Mnist download data done.')
     logger.debug('Mnist download data done.')
 

@@ -1,43 +1,40 @@
 import * as React from 'react';
-import axios from 'axios';
-import { MANAGER_IP } from '../../static/const';
 import ReactEcharts from 'echarts-for-react';
-const echarts = require('echarts/lib/echarts');
+import { TableObj, EventMap } from 'src/static/interface';
+import { filterDuration } from 'src/static/function';
 require('echarts/lib/chart/bar');
 require('echarts/lib/component/tooltip');
 require('echarts/lib/component/title');
-echarts.registerTheme('my_theme', {
-    color: '#3c8dbc'
-});
 
 interface Runtrial {
     trialId: Array<string>;
-    trialTime: Array<number>;
+    trialTime: number[];
+}
+
+interface DurationProps {
+    source: Array<TableObj>;
+    whichGraph: string;
 }
 
 interface DurationState {
-    durationSource: {};
+    startDuration: number; // for record data zoom
+    endDuration: number;
 }
 
-class Duration extends React.Component<{}, DurationState> {
+class Duration extends React.Component<DurationProps, DurationState> {
 
-    static intervalDuration = 1;
-    public _isMounted = false;
+    constructor(props: DurationProps) {
 
-    constructor(props: {}) {
         super(props);
-
         this.state = {
-
-            durationSource: {}
+            startDuration: 0, // for record data zoom
+            endDuration: 100,
         };
-
     }
 
-    getOption = (dataObj: Runtrial) => {
-        let xAxis = dataObj.trialTime;
-        let yAxis = dataObj.trialId;
-        let option = {
+    getOption = (dataObj: Runtrial): any => {
+        const { startDuration, endDuration } = this.state;
+        return {
             tooltip: {
                 trigger: 'axis',
                 axisPointer: {
@@ -50,18 +47,16 @@ class Duration extends React.Component<{}, DurationState> {
                 left: '1%',
                 right: '4%'
             },
-            dataZoom: [{
-                type: 'slider',
-                name: 'trial',
-                filterMode: 'filter',
-                yAxisIndex: 0,
-                orient: 'vertical'
-            }, {
-                type: 'slider',
-                name: 'trial',
-                filterMode: 'filter',
-                xAxisIndex: 0
-            }],
+            dataZoom: [
+                {
+                    id: 'dataZoomY',
+                    type: 'inside',
+                    yAxisIndex: [0],
+                    filterMode: 'empty',
+                    start: startDuration,
+                    end: endDuration
+                },
+            ],
             xAxis: {
                 name: 'Time',
                 type: 'value',
@@ -69,78 +64,83 @@ class Duration extends React.Component<{}, DurationState> {
             yAxis: {
                 name: 'Trial',
                 type: 'category',
-                data: yAxis
+                data: dataObj.trialId
             },
             series: [{
                 type: 'bar',
-                data: xAxis
+                data: dataObj.trialTime
             }]
         };
-        return option;
     }
 
-    drawRunGraph = () => {
+    drawDurationGraph = (source: Array<TableObj>): any => {
+        // why this function run two times when props changed?
+        const trialId: Array<string> = [];
+        const trialTime: number[] = [];
+        const trialRun: Array<Runtrial> = [];
+        const trialJobs = source.filter(filterDuration);
+        Object.keys(trialJobs).map(item => {
+            const temp = trialJobs[item];
+            trialId.push(temp.sequenceId);
+            trialTime.push(temp.duration);
+        });
+        trialRun.push({
+            trialId: trialId,
+            trialTime: trialTime
+        });
+        return this.getOption(trialRun[0]);
+    }
 
-        axios(`${MANAGER_IP}/trial-jobs`, {
-            method: 'GET'
-        })
-            .then(res => {
-                if (res.status === 200) {
-                    const trialJobs = res.data;
-                    const trialId: Array<string> = [];
-                    const trialTime: Array<number> = [];
-                    const trialRun: Array<Runtrial> = [];
-                    Object.keys(trialJobs).map(item => {
-                        if (trialJobs[item].status !== 'WAITING') {
-                            let duration: number = 0;
-                            const end = trialJobs[item].endTime;
-                            const start = trialJobs[item].startTime;
-                            if (start && end) {
-                                duration = (end - start) / 1000;
-                            } else {
-                                duration = (new Date().getTime() - start) / 1000;
-                            }
-                            trialId.push(trialJobs[item].sequenceId);
-                            trialTime.push(duration);
-                        }
-                    });
-                    trialRun.push({
-                        trialId: trialId,
-                        trialTime: trialTime
-                    });
-                    if (this._isMounted && res.status === 200) {
-                        this.setState({
-                            durationSource: this.getOption(trialRun[0])
-                        });
-                    }
+    shouldComponentUpdate(nextProps: DurationProps): boolean {
+
+        const { whichGraph, source } = nextProps;
+        if (whichGraph === '3') {
+            const beforeSource = this.props.source;
+            if (whichGraph !== this.props.whichGraph) {
+                return true;
+            }
+
+            if (source.length !== beforeSource.length) {
+                return true;
+            }
+
+            if (beforeSource[beforeSource.length - 1] !== undefined) {
+                if (source[source.length - 1].duration !== beforeSource[beforeSource.length - 1].duration) {
+                    return true;
                 }
-            });
+                if (source[source.length - 1].status !== beforeSource[beforeSource.length - 1].status) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
-    componentDidMount() {
+    render(): React.ReactNode {
 
-        this._isMounted = true;
-        this.drawRunGraph();
-        Duration.intervalDuration = window.setInterval(this.drawRunGraph, 10000);
-    }
-
-    componentWillUnmount() {
-
-        this._isMounted = false;
-        window.clearInterval(Duration.intervalDuration);
-    }
-
-    render() {
-        const { durationSource } = this.state;
+        const { source } = this.props;
+        const graph = this.drawDurationGraph(source);
+        const onEvents = { 'dataZoom': this.durationDataZoom };
         return (
             <div>
                 <ReactEcharts
-                    option={durationSource}
-                    style={{ width: '100%', height: 412, margin: '0 auto' }}
+                    option={graph}
+                    style={{ width: '95%', height: 412, margin: '0 auto' }}
                     theme="my_theme"
+                    notMerge={true} // update now
+                    onEvents={onEvents}
                 />
             </div>
         );
+    }
+
+    private durationDataZoom = (e: EventMap): void => {
+        if (e.batch !== undefined) {
+            this.setState(() => ({
+                startDuration: (e.batch[0].start !== null ? e.batch[0].start : 0),
+                endDuration: (e.batch[0].end !== null ? e.batch[0].end : 100)
+            }));
+        }
     }
 }
 
